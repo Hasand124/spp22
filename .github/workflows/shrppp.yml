@@ -170,7 +170,7 @@ jobs:
         files: |
           android-recovery/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img
           android-recovery/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/SHRP*.zip
-        name: Unofficial PBRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
+        name: Unofficial SHRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |
           Build: ${{ github.event.inputs.MANIFEST_BRANCH }}
