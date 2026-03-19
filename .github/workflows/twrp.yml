@@ -14,7 +14,7 @@ on:
         - https://github.com/PitchBlackRecoveryProject/manifest_pb 
         - https://github.com/dionprasetyo1/manifest_fb.git
         - https://github.com/SHRP-Reborn/manifest.git
-        - https://github.com/TapinRecovery/SHRP_Manifest.git
+        - https://github.com/TapinRecovery/Manifest.git
       MANIFEST_BRANCH:
         description: 'TWRP Minimal-Manifest Branch'
         required: true
@@ -24,7 +24,7 @@ on:
         - twrp-14.1
         - twrp-12.1
         - twrp-11
-        - shrp-12.1
+        - 12.1
         - android-12.1
       DEVICE_TREE:
         description: 'Custom Recovery Tree' 
