@@ -11,7 +11,7 @@ on:
         options:
         - https://gitlab.com/OrangeFox/sync.git
         - https://github.com/linastorvaldz/fox-sync.git
-        - https://github.com/Teguhpunya/orangefox_sync.git
+        - https://github.com/ashahir05/orangefox-sync.git
       MANIFEST_BRANCH:
         description: 'OrangeFox Branch'
         required: true
