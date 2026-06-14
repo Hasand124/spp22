@@ -24,7 +24,7 @@ on:
         - twrp-14.1
         - twrp-12.1
         - twrp-11
-        - 12.1
+        - shrp-12.1
         - android-12.1
       DEVICE_TREE:
         description: 'Custom Recovery Tree' 
