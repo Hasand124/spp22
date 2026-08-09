@@ -10,6 +10,7 @@ on:
         options:
         - https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp
         - https://github.com/nebrassy/platform_manifest_twrp_aosp.git
+        - https://github.com/Kendrenogen/platform_manifest_twrp_aosp_nebrassy.git
         - https://github.com/Shas45558/Twrp_14_manifest.git
       MANIFEST_BRANCH:
         description: 'TWRP Minimal-Manifest Branch'
