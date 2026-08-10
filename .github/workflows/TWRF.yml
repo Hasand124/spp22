@@ -20,6 +20,7 @@ on:
         options:
         - twrp-14.1-nebrassy
         - twrp-14
+        - twrp-12.1
       DEVICE_TREE:
         description: 'Custom Recovery Tree' 
         required: true
@@ -101,7 +102,7 @@ jobs:
       uses: haya14busa/action-cond@v1
       id: manifest
       with:
-        cond: ${{ github.event.inputs.MANIFEST_BRANCH == 'twrp-14.1-nebrassy' || github.event.inputs.MANIFEST_BRANCH == 'twrp-14' }}
+        cond: ${{ github.event.inputs.MANIFEST_BRANCH == 'twrp-14.1-nebrassy' || github.event.inputs.MANIFEST_BRANCH == 'twrp-14' || github.event.inputs.MANIFEST_BRANCH == 'twrp-12.1' }}
         if_true: ${{ github.event.inputs.MANIFEST_URL }}
         if_false: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git
 
