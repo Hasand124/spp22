@@ -1,4 +1,4 @@
-name: OrangeFox - new - Build
+name: OrangeFox - R14.1 - Build
 
 on:
   workflow_dispatch:
