@@ -3,6 +3,15 @@ name: OrangeFox - 14.1 - Build
 on:
   workflow_dispatch:
     inputs:
+      SYNC_URL: 
+        description: 'SYNC_URL' 
+        required: true 
+        default: 'https://gitlab.com/OrangeFox/sync.git' 
+        type: choice
+        options:
+        - https://gitlab.com/OrangeFox/sync.git
+        - https://github.com/linastorvaldz/fox-sync.git
+        - https://github.com/ashahir05/orangefox-sync.git
       MANIFEST_BRANCH:
         description: 'OrangeFox Branch'
         required: true
@@ -92,7 +101,7 @@ jobs:
         cd ${GITHUB_WORKSPACE}/OrangeFox
         git config --global user.name "Samuel Kendall"
         git config --global user.email "kinguser981@gmail.com"
-        git clone https://gitlab.com/OrangeFox/sync.git
+        git clone ${{ github.event.inputs.SYNC_URL }}
         cd sync
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
 
