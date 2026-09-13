@@ -14,6 +14,7 @@ on:
         - https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git
         - https://github.com/linastorvaldz/platform_manifest_twrp_aosp.git
         - https://github.com/Hasand124/platform_manifest_twrp_aosp.git
+        - https://github.com/minimal-manifest-twrp/platform_manifest_twrp_lineageos.git
       MANIFEST_BRANCH:
         description: 'TWRP Minimal-Manifest Branch'
         required: true
