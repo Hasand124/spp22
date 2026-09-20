@@ -76,17 +76,16 @@ jobs:
           echo "=== Patch 3: Hapus paksa semua flag -Werror di Makefile ==="
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/-Werror//g' {} +
 
-      - name: Download AOSP Clang Toolchain (r450784d)
+      - name: Download AOSP Clang r450784d via Git
         run: |
-          mkdir -p clang-toolchain
-          echo "Downloading AOSP Clang r450784d..."
+          echo "Cloning AOSP Clang r450784d..."
+          git clone --depth=1 -b android12-release https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 $GITHUB_WORKSPACE/clang-main
           
-          # Mengunduh via GitHub Releases tarball yang valid
-          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/14.0.7-r450784d-release/Clang-14.0.7-r450784d.tar.gz" -o clang.tar.gz || \
-          curl -L "https://gitlab.com/panchajanya/tc-build/-/raw/master/clang-r450784d.tar.gz" -o clang.tar.gz
-
-          tar -xzf clang.tar.gz -C clang-toolchain
-          rm -f clang.tar.gz
+          # Buat direktori toolchain & pindahkan versi r450784d
+          mkdir -p $GITHUB_WORKSPACE/clang-toolchain
+          cp -r $GITHUB_WORKSPACE/clang-main/clang-r450784d/* $GITHUB_WORKSPACE/clang-toolchain/
+          rm -rf $GITHUB_WORKSPACE/clang-main
+          
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
       - name: Find and Setup Kernel Defconfig
