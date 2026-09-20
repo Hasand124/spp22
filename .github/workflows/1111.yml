@@ -187,55 +187,75 @@ jobs:
             exit 1
 
           fi
-      - name: Build Kernel with Error Catching
+
+
+
+      - name: Build Kernel
+
         run: |
+
           cd ${{ env.KERNEL_DIR }}
+
           export ARCH=arm64
+
           export SUBARCH=arm64
+
           export PATH="$GITHUB_WORKSPACE/clang-toolchain/bin:$PATH"
 
-          EXTRA_FLAGS="-Wno-error -Wno-unused-variable -Wno-unused-but-set-variable -Wno-enum-conversion -Wno-implicit-function-declaration -Wno-typedef-redefinition"
+          
 
-          MAKE_CMD=(
-            make O=out
-            ARCH=arm64
-            CC=clang
-            LD=ld.lld
-            AR=llvm-ar
-            NM=llvm-nm
-            OBJCOPY=llvm-objcopy
-            OBJDUMP=llvm-objdump
-            STRIP=llvm-strip
-            CLANG_TRIPLE=aarch64-linux-gnu-
-            CROSS_COMPILE=aarch64-linux-gnu-
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-            LLVM=1
-            LLVM_IAS=0
-            KCFLAGS="$EXTRA_FLAGS"
-            KBUILD_CFLAGS="$EXTRA_FLAGS"
-          )
+          make -j$(nproc) O=out \
 
-          echo "=== Menjalankan Build Paralel ==="
-          "${MAKE_CMD[@]}" -j$(nproc) || {
-            echo "--------------------------------------------------------"
-            echo "BUILD PARALEL GAGAL. Menjalankan ulang dengan -j1 untuk isolasi error..."
-            echo "--------------------------------------------------------"
-            "${MAKE_CMD[@]}" -j1
-          }
+            ARCH=arm64 \
+
+            CC=clang \
+
+            LD=ld.lld \
+
+            AR=llvm-ar \
+
+            NM=llvm-nm \
+
+            OBJCOPY=llvm-objcopy \
+
+            OBJDUMP=llvm-objdump \
+
+            STRIP=llvm-strip \
+
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+
+            CROSS_COMPILE=aarch64-linux-gnu- \
+
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+
+            LLVM=1 \
+
+            LLVM_IAS=1
+
+
 
       - name: Check Build Output
+
         run: |
+
           ls -la ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/ || true
 
+
+
       - name: Upload Kernel Artifact
+
         uses: actions/upload-artifact@v4
+
         with:
+
           name: Camellian-Kernel-Output
+
           path: |
+
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz-dtb
+
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
-            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
+
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb
+
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb.img
-            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtbo.img
-          if-no-files-found: warn
