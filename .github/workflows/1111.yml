@@ -59,22 +59,18 @@ jobs:
           git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} ${{ github.event.inputs.kernel_repo }} kernel-source
           echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel-source" >> $GITHUB_ENV
 
-      - name: Apply Auto-Patches & Strip -Werror
+      - name: Apply Auto-Patches for Known Compilation Errors
         run: |
           cd ${{ env.KERNEL_DIR }}
-          
-          echo "=== Patch 1: Unused variable 'nid' in mm/vmscan.c ==="
+          echo "=== Applying Fix 1: Fix unused variable 'nid' in mm/vmscan.c ==="
           if [ -f mm/vmscan.c ]; then
             sed -i 's/int nid;/int nid __maybe_unused;/g' mm/vmscan.c
           fi
 
-          echo "=== Patch 2: mt_get_uartlog_status conflict in include/linux/printk.h ==="
+          echo "=== Applying Fix 2: Fix mt_get_uartlog_status conflict in include/linux/printk.h ==="
           if [ -f include/linux/printk.h ]; then
             sed -i 's/extern bool mt_get_uartlog_status(void);/#ifndef _MTK_PRINTK_CTRL_H\nextern bool mt_get_uartlog_status(void);\n#endif/g' include/linux/printk.h
           fi
-
-          echo "=== Patch 3: Hapus paksa semua flag -Werror di Makefile ==="
-          find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/-Werror//g' {} +
 
       - name: Download AOSP Clang Toolchain (r450784d)
         run: |
