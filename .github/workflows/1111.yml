@@ -79,11 +79,11 @@ jobs:
       - name: Download AOSP Clang Toolchain (r450784d)
         run: |
           mkdir -p clang-toolchain
-          echo "Downloading AOSP Clang Toolchain r450784d..."
+          echo "Downloading AOSP Clang r450784d..."
           
-          # Mengunduh langsung archive tar.xz Clang r450784d yang valid
-          wget -q https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-14.0.7-r450784d.tar.gz -O clang.tar.gz || \
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r450784d.tar.gz -O clang.tar.gz
+          # Mengunduh via GitHub Releases tarball yang valid
+          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/14.0.7-r450784d-release/Clang-14.0.7-r450784d.tar.gz" -o clang.tar.gz || \
+          curl -L "https://gitlab.com/panchajanya/tc-build/-/raw/master/clang-r450784d.tar.gz" -o clang.tar.gz
 
           tar -xzf clang.tar.gz -C clang-toolchain
           rm -f clang.tar.gz
