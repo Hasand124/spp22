@@ -27,14 +27,54 @@ jobs:
     steps:
 
       # ============================================================
+      # VERIFY REPOSITORY BRANCH
+      # ============================================================
+      - name: Verify Camellian T OSS Branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPOSITORY="https://github.com/Hasand124/spp22.git"
+          BRANCH="camellian-t-oss"
+
+          echo "Checking repository: $REPOSITORY"
+          echo "Checking branch: $BRANCH"
+
+          if ! git ls-remote --exit-code --heads "$REPOSITORY" "$BRANCH"; then
+            echo "::error::Branch '$BRANCH' tidak ditemukan atau repository tidak dapat diakses."
+            echo
+            echo "Remote branches yang tersedia:"
+            git ls-remote --heads "$REPOSITORY" || true
+            exit 1
+          fi
+
+          echo "Branch '$BRANCH' tersedia."
+
+      # ============================================================
       # CHECKOUT
       # ============================================================
       - name: Checkout Camellian T OSS
         uses: actions/checkout@v4
         with:
+          repository: Hasand124/spp22
           ref: camellian-t-oss
-          submodules: recursive
           fetch-depth: 1
+          submodules: false
+
+      # ============================================================
+      # INITIALIZE SUBMODULES
+      # ============================================================
+      - name: Initialize Git Submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f .gitmodules ]; then
+            git submodule sync --recursive
+            git submodule update --init --recursive
+          else
+            echo "No .gitmodules file found. Skipping submodules."
+          fi
 
       # ============================================================
       # DEPENDENCIES
