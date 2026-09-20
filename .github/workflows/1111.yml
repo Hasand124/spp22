@@ -1,4 +1,4 @@
-name: Build Xiaomi Camellian Kernel
+name: Build Xiaomi Camellian Kernel1
 
 on:
   workflow_dispatch:
