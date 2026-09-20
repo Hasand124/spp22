@@ -1,4 +1,4 @@
-name: Build Xiaomi Camellian Kernel333
+name: Build Xiaomi Camellian T Kernel
 
 on:
   workflow_dispatch:
@@ -27,60 +27,51 @@ jobs:
     steps:
 
       # ============================================================
-      # VERIFY REPOSITORY BRANCH
-      # ============================================================
-      - name: Verify Camellian T OSS Branch
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          REPOSITORY="https://github.com/MiCode/Xiaomi_Kernel_OpenSource/tree/camellian-t-oss"
-          BRANCH="camellian-t-oss"
-
-          echo "Checking repository: $REPOSITORY"
-          echo "Checking branch: $BRANCH"
-
-          if ! git ls-remote --exit-code --heads "$REPOSITORY" "$BRANCH"; then
-            echo "::error::Branch '$BRANCH' tidak ditemukan atau repository tidak dapat diakses."
-            echo
-            echo "Remote branches yang tersedia:"
-            git ls-remote --heads "$REPOSITORY" || true
-            exit 1
-          fi
-
-          echo "Branch '$BRANCH' tersedia."
-
-      # ============================================================
       # CHECKOUT
       # ============================================================
-      - name: Checkout Camellian T OSS
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
           repository: Hasand124/spp22
           ref: camellian-t-oss
           fetch-depth: 1
-          submodules: false
+          submodules: recursive
 
       # ============================================================
-      # INITIALIZE SUBMODULES
+      # SOURCE INFORMATION
       # ============================================================
-      - name: Initialize Git Submodules
+      - name: Show Source Information
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
-          if [ -f .gitmodules ]; then
-            git submodule sync --recursive
-            git submodule update --init --recursive
-          else
-            echo "No .gitmodules file found. Skipping submodules."
-          fi
+          echo "=========================================="
+          echo "SOURCE INFORMATION"
+          echo "=========================================="
+
+          echo "Repository:"
+          git remote -v
+
+          echo
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo
+          echo "Kernel version:"
+          make kernelversion
+
+          echo
+          echo "Architecture:"
+          uname -m
 
       # ============================================================
       # DEPENDENCIES
       # ============================================================
       - name: Install Dependencies
+        shell: bash
         run: |
+          set -euxo pipefail
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -88,12 +79,15 @@ jobs:
             bison \
             build-essential \
             ccache \
+            clang \
             flex \
             git \
             libelf-dev \
             libncurses5-dev \
+            libncurses-dev \
             libssl-dev \
             lz4 \
+            pahole \
             python3 \
             rsync \
             unzip \
@@ -104,69 +98,75 @@ jobs:
       # ============================================================
       # TOOLCHAIN
       # ============================================================
-      - name: Download Android GCC 4.9
+      - name: Download Android GCC Toolchains
+        shell: bash
         run: |
-          set -e
+          set -euxo pipefail
+
+          mkdir -p "$GITHUB_WORKSPACE/toolchains"
 
           git clone --depth=1 \
             https://github.com/protocol-v/aarch64-linux-android-4.9.git \
-            gcc64
+            "$GITHUB_WORKSPACE/toolchains/gcc64"
 
           git clone --depth=1 \
             https://github.com/protocol-v/arm-linux-androideabi-4.9.git \
-            gcc32
+            "$GITHUB_WORKSPACE/toolchains/gcc32"
 
-          echo "$GITHUB_WORKSPACE/gcc64/bin" >> "$GITHUB_PATH"
-          echo "$GITHUB_WORKSPACE/gcc32/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/toolchains/gcc64/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/toolchains/gcc32/bin" >> "$GITHUB_PATH"
 
       # ============================================================
       # VERIFY TOOLCHAIN
       # ============================================================
       - name: Verify Toolchain
+        shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
-          echo "AArch64 GCC:"
+          echo "=========================================="
+          echo "TOOLCHAIN"
+          echo "=========================================="
+
+          command -v aarch64-linux-android-gcc
+          command -v arm-linux-androideabi-gcc
+
           aarch64-linux-android-gcc --version
-
-          echo
-          echo "ARM32 GCC:"
           arm-linux-androideabi-gcc --version
 
       # ============================================================
-      # INSPECT SOURCE
+      # DETECT DEFCONFIG
       # ============================================================
-      - name: Inspect Kernel Source
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "Kernel Source"
-          echo "=========================================="
-
-          git branch --show-current
-          git rev-parse --short HEAD
-
-          echo
-          echo "Kernel version:"
-          make kernelversion
-
-          echo
-          echo "Available defconfigs:"
-          find arch/arm64/configs \
-            -type f \
-            -printf "%f\n" \
-            | sort
-
-      # ============================================================
-      # FIND CAMELLIAN DEFCONFIG
-      # ============================================================
-      - name: Detect Camellian Defconfig
+      - name: Detect Defconfig
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Searching Camellian defconfig..."
+          CONFIG_DIR="arch/arm64/configs"
+
+          echo "=========================================="
+          echo "SEARCHING DEFCONFIG"
+          echo "=========================================="
+
+          if [ ! -d "$CONFIG_DIR" ]; then
+            echo "::error::$CONFIG_DIR tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Candidate configs:"
+
+          find "$CONFIG_DIR" \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -iname "*camellian*" \
+              -o \
+              -iname "*mt6785*" \
+              -o \
+              -iname "*surya*" \
+            \) \
+            -printf "%f\n" \
+            | sort || true
 
           DEFCONFIG=""
 
@@ -177,30 +177,35 @@ jobs:
             camellian_userdebug_defconfig \
             mt6785_defconfig
           do
-            if [ -f "arch/arm64/configs/$cfg" ]; then
+            if [ -f "$CONFIG_DIR/$cfg" ]; then
               DEFCONFIG="$cfg"
               break
             fi
           done
 
           if [ -z "$DEFCONFIG" ]; then
-            DEFCONFIG=$(find arch/arm64/configs \
-              -type f \
-              \( \
-                -iname "*camellian*" \
-                -o \
-                -iname "*mt6785*" \
-              \) \
-              -printf "%f\n" \
-              | head -n 1 || true)
+            DEFCONFIG="$(
+              find "$CONFIG_DIR" \
+                -maxdepth 1 \
+                -type f \
+                \( \
+                  -iname "*camellian*" \
+                  -o \
+                  -iname "*mt6785*" \
+                \) \
+                -printf "%f\n" \
+                | sort \
+                | head -n 1
+            )"
           fi
 
           if [ -z "$DEFCONFIG" ]; then
             echo "::error::Camellian/MT6785 defconfig tidak ditemukan."
 
             echo
-            echo "Available configs:"
-            find arch/arm64/configs \
+            echo "All available defconfigs:"
+            find "$CONFIG_DIR" \
+              -maxdepth 1 \
               -type f \
               -printf "%f\n" \
               | sort
@@ -211,33 +216,46 @@ jobs:
           echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_ENV"
 
           echo
-          echo "Using:"
+          echo "Selected defconfig:"
           echo "$DEFCONFIG"
 
       # ============================================================
-      # CONFIGURE KERNEL
+      # CONFIGURE
       # ============================================================
       - name: Configure Kernel
+        shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
+          rm -rf "$OUT_DIR"
           mkdir -p "$OUT_DIR"
 
-          make O="$OUT_DIR" \
+          make \
+            O="$OUT_DIR" \
             ARCH="$ARCH" \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             "$DEFCONFIG"
 
           test -f "$OUT_DIR/.config"
 
           echo
-          echo "Kernel configuration generated."
+          echo "Kernel configuration generated successfully."
+
+          echo
+          echo "CONFIGURATION:"
+          grep -E \
+            'CONFIG_(LOCALVERSION|CC_VERSION_TEXT|MODULES|ARM64|64BIT)' \
+            "$OUT_DIR/.config" \
+            || true
 
       # ============================================================
-      # BUILD KERNEL
+      # BUILD
       # ============================================================
       - name: Build Kernel
+        shell: bash
         run: |
-          set -e
+          set -o pipefail
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -246,10 +264,9 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
           echo "=========================================="
-          echo "Building Kernel"
+          echo "BUILDING KERNEL"
           echo "=========================================="
 
-          echo
           echo "CPU:"
           nproc
 
@@ -257,173 +274,214 @@ jobs:
           echo "Compiler:"
           aarch64-linux-android-gcc --version | head -n 1
 
-          make -j"$(nproc)" \
+          echo
+          echo "Starting build..."
+
+          make \
+            -j"$(nproc)" \
             O="$OUT_DIR" \
-            ARCH=arm64 \
+            ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32"
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            2>&1 | tee kernel-build.log
+
+          BUILD_STATUS=${PIPESTATUS[0]}
+
+          echo
+          echo "Build exit status: $BUILD_STATUS"
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo "LAST BUILD ERRORS"
+            echo "=========================================="
+
+            grep -iE \
+              'error:|fatal error:|undefined reference|No such file|not found|failed' \
+              kernel-build.log \
+              | tail -n 100 \
+              || true
+
+            echo
+            echo "Full build log saved as artifact."
+
+            exit "$BUILD_STATUS"
+          fi
 
       # ============================================================
       # BUILD MODULES
       # ============================================================
-      - name: Build Kernel Modules
+      - name: Build Modules
         if: ${{ github.event.inputs.build_target == 'modules' }}
+        shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
           export ARCH=arm64
+          export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
-          make -j"$(nproc)" \
+          make \
+            -j"$(nproc)" \
             O="$OUT_DIR" \
-            ARCH=arm64 \
+            ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             modules
 
-          make -j"$(nproc)" \
+          rm -rf "$GITHUB_WORKSPACE/modules"
+
+          make \
+            -j"$(nproc)" \
             O="$OUT_DIR" \
-            ARCH=arm64 \
+            ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             modules_install \
             INSTALL_MOD_PATH="$GITHUB_WORKSPACE/modules"
 
       # ============================================================
-      # INSPECT BOOT OUTPUT
+      # INSPECT OUTPUT
       # ============================================================
-      - name: Inspect Boot Output
+      - name: Inspect Kernel Output
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           echo "=========================================="
-          echo "arch/arm64/boot"
+          echo "KERNEL OUTPUT"
           echo "=========================================="
 
           find "$OUT_DIR/arch/arm64/boot" \
-            -maxdepth 4 \
+            -maxdepth 5 \
             -type f \
             -printf "%p\n" \
             | sort
 
-      # ============================================================
-      # CREATE Image.gz-dtb
-      # ============================================================
-      - name: Create Image.gz-dtb
-        if: ${{ github.event.inputs.build_target == 'Image.gz-dtb' }}
-        shell: bash
-        run: |
-          set -e
-
-          IMAGE="$OUT_DIR/arch/arm64/boot/Image.gz"
-          OUTPUT="$OUT_DIR/arch/arm64/boot/Image.gz-dtb"
-
-          if [ ! -f "$IMAGE" ]; then
-            echo "::error::Image.gz tidak ditemukan."
-            exit 1
-          fi
-
-          echo "Searching MT6785/Camellian DTB..."
-
-          DTB=""
-
-          DTB=$(find "$OUT_DIR/arch/arm64/boot/dts" \
-            -type f \
-            -name "*.dtb" \
-            \( \
-              -iname "*camellian*" \
-              -o \
-              -iname "*camellia*" \
-              -o \
-              -iname "*mt6785*" \
-            \) \
-            | head -n 1 || true)
-
-          if [ -z "$DTB" ]; then
-            echo "::error::Camellian/MT6785 DTB tidak ditemukan."
-
-            echo
-            echo "Available DTBs:"
-            find "$OUT_DIR/arch/arm64/boot/dts" \
-              -type f \
-              -name "*.dtb" \
-              | sort
-
-            exit 1
-          fi
-
           echo
-          echo "Selected DTB:"
-          echo "$DTB"
+          echo "Kernel images:"
 
-          cat "$IMAGE" "$DTB" > "$OUTPUT"
-
-          echo
-          echo "Created:"
-          ls -lh "$OUTPUT"
+          ls -lh \
+            "$OUT_DIR/arch/arm64/boot/Image" \
+            "$OUT_DIR/arch/arm64/boot/Image.gz" \
+            "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" \
+            2>/dev/null || true
 
       # ============================================================
-      # PREPARE ARTIFACT
+      # PREPARE RELEASE
       # ============================================================
       - name: Prepare Release
         shell: bash
         run: |
-          set -e
-
-          mkdir -p release
+          set -euo pipefail
 
           TARGET="${{ github.event.inputs.build_target }}"
+
+          rm -rf release
+          mkdir -p release
+
+          echo "=========================================="
+          echo "PREPARING RELEASE"
+          echo "=========================================="
 
           case "$TARGET" in
 
             Image.gz-dtb)
-              cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" \
-                release/Image.gz-dtb
+              if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ]; then
+                cp \
+                  "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" \
+                  release/Image.gz-dtb
+
+              elif [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
+                echo "::warning::Image.gz-dtb tidak dibuat oleh kernel build."
+                echo "::warning::Menggunakan Image.gz sebagai fallback."
+
+                cp \
+                  "$OUT_DIR/arch/arm64/boot/Image.gz" \
+                  release/Image.gz
+
+              else
+                echo "::error::Image.gz tidak ditemukan."
+                exit 1
+              fi
               ;;
 
             Image.gz)
-              cp "$OUT_DIR/arch/arm64/boot/Image.gz" \
+              test -f "$OUT_DIR/arch/arm64/boot/Image.gz"
+
+              cp \
+                "$OUT_DIR/arch/arm64/boot/Image.gz" \
                 release/Image.gz
               ;;
 
             Image)
-              cp "$OUT_DIR/arch/arm64/boot/Image" \
+              test -f "$OUT_DIR/arch/arm64/boot/Image"
+
+              cp \
+                "$OUT_DIR/arch/arm64/boot/Image" \
                 release/Image
               ;;
 
             modules)
-              cp -a modules release/
+              test -d "$GITHUB_WORKSPACE/modules"
+
+              cp -a \
+                "$GITHUB_WORKSPACE/modules" \
+                release/modules
+              ;;
+
+            *)
+              echo "::error::Unknown build target: $TARGET"
+              exit 1
               ;;
 
           esac
 
-          cp "$OUT_DIR/.config" \
+          cp \
+            "$OUT_DIR/.config" \
             release/kernel.config
 
-          echo "DEFCONFIG=$DEFCONFIG" \
-            > release/build-info.txt
-
-          echo "TARGET=$TARGET" \
-            >> release/build-info.txt
-
-          echo "KERNEL_VERSION=$(make O="$OUT_DIR" kernelversion)" \
-            >> release/build-info.txt
-
-          echo "COMMIT=$(git rev-parse HEAD)" \
-            >> release/build-info.txt
+          {
+            echo "DEFCONFIG=$DEFCONFIG"
+            echo "TARGET=$TARGET"
+            echo "KERNEL_VERSION=$(make O="$OUT_DIR" kernelversion)"
+            echo "COMMIT=$(git rev-parse HEAD)"
+            echo "BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          } > release/build-info.txt
 
           echo
           echo "=========================================="
-          echo "Release"
+          echo "RELEASE CONTENT"
           echo "=========================================="
 
-          ls -lah release/
+          find release \
+            -type f \
+            -printf "%p\n" \
+            | sort
+
+          echo
+          du -ah release
 
       # ============================================================
-      # UPLOAD ARTIFACT
+      # UPLOAD BUILD LOG
+      # ============================================================
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Camellian-T-build-log-${{ github.run_number }}
+          path: |
+            kernel-build.log
+            out/.config
+          if-no-files-found: ignore
+          compression-level: 6
+
+      # ============================================================
+      # UPLOAD KERNEL
       # ============================================================
       - name: Upload Kernel
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Camellian-T-Kernel-${{ github.run_number }}
