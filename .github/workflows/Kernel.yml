@@ -418,13 +418,30 @@ jobs:
           "$ANDROID_GCC/bin/aarch64-linux-android-gcc" \
             --version
 
+          set +e
+
           make \
-            -j"$(nproc)" \
+            -j1 \
+            V=1 \
+            KBUILD_VERBOSE=1 \
             O="$OUT_DIR" \
             ARCH="$ARCH" \
             SUBARCH="$SUBARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             2>&1 | tee kernel-build.log
+
+          BUILD_STATUS=${PIPESTATUS[0]}
+
+          echo ""
+          echo "=========================================="
+          echo " BUILD ERROR SUMMARY"
+          echo "=========================================="
+
+          grep -nEi \
+            'error:|fatal error:|undefined reference|No rule to make|Error [0-9]+|cannot find' \
+            kernel-build.log | tail -100 || true
+
+          exit "$BUILD_STATUS"
 
       # ==========================================================
       # BUILD MODULES
@@ -442,7 +459,8 @@ jobs:
           if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
 
             make \
-              -j"$(nproc)" \
+              -j1 \
+              V=1 \
               O="$OUT_DIR" \
               ARCH="$ARCH" \
               SUBARCH="$SUBARCH" \
@@ -503,6 +521,33 @@ jobs:
               modules_install \
               INSTALL_MOD_PATH="$GITHUB_WORKSPACE/$OUT_DIR/modules"
 
+          fi
+
+      # ==========================================================
+      # DIAGNOSTICS
+      # ==========================================================
+
+      - name: Collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo "=========================================="
+          echo " DIAGNOSTICS"
+          echo "=========================================="
+          for LOG in kernel-build.log modules-build.log; do
+            if [ -f "$LOG" ]; then
+              echo "--- $LOG ---"
+              grep -nEi \
+                'error:|fatal error:|undefined reference|No rule to make|Error [0-9]+|cannot find' \
+                "$LOG" | tail -100 || true
+            fi
+          done
+          echo "--- compiler ---"
+          "$ANDROID_GCC/bin/aarch64-linux-android-gcc" --version || true
+          echo "--- kernel config ---"
+          if [ -f "$OUT_DIR/.config" ]; then
+            grep -E '^CONFIG_(ARM64|MODULES|MIHW|MILLET)=' "$OUT_DIR/.config" || true
           fi
 
       # ==========================================================
@@ -717,5 +762,7 @@ jobs:
             camellian-kernel-*.zip
             release/
             kernel-build.log
-          if-no-files-found: error
+          if-no-files-found: warn
+          retention-days: 7
           compression-level: 6
+          if: always()
