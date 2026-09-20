@@ -1,86 +1,421 @@
-name: Build Xiaomi Camellian Kernelee
+name: Build Xiaomi Camellian Kernel333
 
 on:
   workflow_dispatch:
     inputs:
-        build_target:
-          description: 'Build Target (default: Image.gz-dtb)'
-          required: true
-          default: 'Image.gz-dtb'
+      build_target:
+        description: "Build Target"
+        required: true
+        default: "Image.gz-dtb"
+        type: choice
+        options:
+          - Image.gz-dtb
+          - Image.gz
+          - Image
+          - modules
 
 jobs:
   build-kernel:
-    runs-on: ubuntu-latest
-    
+    name: Build Camellian Kernel
+    runs-on: ubuntu-22.04
+
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      OUT_DIR: out
+
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
-      - name: Set up Environment & Dependencies
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            build-data-libc \
-            build-essential \
             bc \
-            binutils \
             bison \
+            build-essential \
+            ccache \
+            clang \
             flex \
-            libssl-dev \
-            libelf-dev \
+            gcc \
+            g++ \
             git \
-            wget \
+            libelf-dev \
+            libncurses5-dev \
+            libssl-dev \
+            lz4 \
+            python3 \
+            python3-pip \
             rsync \
             unzip \
-            zip \
-            libncurses5-dev \
-            python3
+            wget \
+            xz-utils \
+            zip
 
-      - name: Setup Toolchain (GCC 64-bit & 32-bit)
+      # ============================================================
+      # TOOLCHAIN
+      # ============================================================
+      - name: Setup Android GCC 4.9 Toolchain
         run: |
-          echo "Setting up Linaro / AArch64 Toolchain..."
-          git clone --depth=1 https://github.com/protocol-v/aarch64-linux-android-4.9.git -b master gcc64
-          git clone --depth=1 https://github.com/protocol-v/arm-linux-androideabi-4.9.git -b master gcc32
-          
-          # Tambahkan ke path sementara
-          echo "$GITHUB_WORKSPACE/gcc64/bin" >> $GITHUB_PATH
-          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
+          set -e
 
-      - name: Setup Kernel Build Configuration
+          echo "========================================="
+          echo " Download Android GCC 4.9"
+          echo "========================================="
+
+          git clone --depth=1 \
+            https://github.com/protocol-v/aarch64-linux-android-4.9.git \
+            -b master \
+            gcc64
+
+          git clone --depth=1 \
+            https://github.com/protocol-v/arm-linux-androideabi-4.9.git \
+            -b master \
+            gcc32
+
+          echo "$GITHUB_WORKSPACE/gcc64/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/gcc32/bin" >> "$GITHUB_PATH"
+
+          echo
+          echo "64-bit compiler:"
+          aarch64-linux-android-gcc --version
+
+          echo
+          echo "32-bit compiler:"
+          arm-linux-androideabi-gcc --version
+
+      # ============================================================
+      # CHECK KERNEL TREE
+      # ============================================================
+      - name: Detect Kernel Tree
+        shell: bash
         run: |
-          # Periksa ketersediaan defconfig untuk camellian/camellia
-          # Umumnya menggunakan arsitektur arm64
-          export ARCH=arm64
-          export SUBARCH=arm64
-          
-          # Cari file defconfig yang sesuai diarch/arm64/configs/
-          # Contoh target defconfig untuk device MTK biasanya ada di dalam tree
-          make O=out camellian_defconfig || make O=out defconfig
+          set -e
 
+          echo "========================================="
+          echo " Kernel Tree Information"
+          echo "========================================="
+
+          echo "Kernel:"
+          make --version | head -n 1
+
+          echo
+          echo "Architecture:"
+          ls -la arch/arm64/
+
+          echo
+          echo "Available defconfigs:"
+          find arch/arm64/configs \
+            -maxdepth 2 \
+            -type f \
+            | sort
+
+      # ============================================================
+      # DETECT DEFCONFIG
+      # ============================================================
+      - name: Setup Kernel Defconfig
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$OUT_DIR"
+
+          DEFCONFIG=""
+
+          # --------------------------------------------------------
+          # Cari camellian
+          # --------------------------------------------------------
+          if [ -f "arch/arm64/configs/camellian_defconfig" ]; then
+            DEFCONFIG="camellian_defconfig"
+
+          elif [ -f "arch/arm64/configs/camellian_defconfig" ]; then
+            DEFCONFIG="camellian_defconfig"
+
+          # --------------------------------------------------------
+          # Cari camellia
+          # --------------------------------------------------------
+          elif [ -f "arch/arm64/configs/camellia_defconfig" ]; then
+            DEFCONFIG="camellia_defconfig"
+
+          # --------------------------------------------------------
+          # Cari MT6769
+          # --------------------------------------------------------
+          elif [ -f "arch/arm64/configs/mt6769_defconfig" ]; then
+            DEFCONFIG="mt6769_defconfig"
+
+          # --------------------------------------------------------
+          # Cari config yang mengandung camellian
+          # --------------------------------------------------------
+          else
+            DEFCONFIG=$(find arch/arm64/configs \
+              -type f \
+              -iname '*camellian*' \
+              -printf '%f\n' \
+              | head -n 1 || true)
+          fi
+
+          if [ -z "$DEFCONFIG" ]; then
+            echo "::error::Camellian defconfig tidak ditemukan."
+            echo
+            echo "Defconfig yang tersedia:"
+            find arch/arm64/configs \
+              -type f \
+              -printf '%f\n' \
+              | sort
+            exit 1
+          fi
+
+          echo "========================================="
+          echo "Using defconfig: $DEFCONFIG"
+          echo "========================================="
+
+          make O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            "$DEFCONFIG"
+
+          if [ ! -f "$OUT_DIR/.config" ]; then
+            echo "::error::.config tidak berhasil dibuat."
+            exit 1
+          fi
+
+          echo
+          echo "Kernel configuration created successfully."
+
+      # ============================================================
+      # BUILD KERNEL
+      # ============================================================
       - name: Build Kernel
+        shell: bash
         run: |
+          set -e
+
+          echo "========================================="
+          echo " Building Kernel"
+          echo "========================================="
+
           export ARCH=arm64
           export SUBARCH=arm64
+
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          
-          # Optimasi kompilasi berdasarkan core CPU runner GitHub (2 cores)
+
+          # Jangan pakai CC=gcc.
+          # Kernel akan menggunakan compiler/toolchain
+          # berdasarkan konfigurasi kernel.
+
+          echo
+          echo "Compiler:"
+          which aarch64-linux-android-gcc
+          aarch64-linux-android-gcc --version | head -n 1
+
+          echo
+          echo "Build cores:"
           nproc
-          make -j$(nproc) O=out \
+
+          make -j"$(nproc)" \
+            O="$OUT_DIR" \
             ARCH=arm64 \
-            CC=gcc \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32"
 
-      - name: Check Build Output
+      # ============================================================
+      # FIND KERNEL OUTPUT
+      # ============================================================
+      - name: Inspect Kernel Output
+        shell: bash
         run: |
-          ls -l out/arch/arm64/boot/
+          set -e
 
-      - name: Upload Kernel Artifact (Image.gz-dtb / AnyKernel3 ready)
+          echo "========================================="
+          echo " Kernel Output"
+          echo "========================================="
+
+          find "$OUT_DIR/arch/arm64/boot" \
+            -maxdepth 3 \
+            -type f \
+            -printf '%p\n' \
+            | sort
+
+      # ============================================================
+      # CREATE Image.gz-dtb
+      # ============================================================
+      - name: Create Image.gz-dtb
+        if: ${{ github.event.inputs.build_target == 'Image.gz-dtb' }}
+        shell: bash
+        run: |
+          set -e
+
+          IMAGE="$OUT_DIR/arch/arm64/boot/Image.gz"
+          OUTPUT="$OUT_DIR/arch/arm64/boot/Image.gz-dtb"
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "::error::Image.gz tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Searching DTB..."
+
+          DTB=""
+
+          # --------------------------------------------------------
+          # Cari DTB MediaTek
+          # --------------------------------------------------------
+          DTB=$(find "$OUT_DIR/arch/arm64/boot/dts" \
+            -type f \
+            \( -name "*.dtb" -o -name "*.dtbo" \) \
+            | grep -Ei \
+              'camellian|camellia|mt6769|mt6785|mt6768' \
+            | head -n 1 || true)
+
+          # Jika tidak ketemu, ambil DTB pertama
+          if [ -z "$DTB" ]; then
+            DTB=$(find "$OUT_DIR/arch/arm64/boot/dts" \
+              -type f \
+              -name "*.dtb" \
+              | head -n 1 || true)
+          fi
+
+          if [ -z "$DTB" ]; then
+            echo "::error::DTB tidak ditemukan."
+            echo
+            echo "Isi directory DTS:"
+            find "$OUT_DIR/arch/arm64/boot/dts" \
+              -type f \
+              | sort
+            exit 1
+          fi
+
+          echo "Using DTB:"
+          echo "$DTB"
+
+          cat "$IMAGE" "$DTB" > "$OUTPUT"
+
+          echo
+          echo "Created:"
+          ls -lh "$OUTPUT"
+
+      # ============================================================
+      # CHECK REQUESTED TARGET
+      # ============================================================
+      - name: Verify Build Target
+        shell: bash
+        run: |
+          set -e
+
+          TARGET="${{ github.event.inputs.build_target }}"
+
+          echo "Requested target: $TARGET"
+
+          case "$TARGET" in
+
+            Image.gz-dtb)
+              test -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb"
+              ;;
+
+            Image.gz)
+              test -f "$OUT_DIR/arch/arm64/boot/Image.gz"
+              ;;
+
+            Image)
+              test -f "$OUT_DIR/arch/arm64/boot/Image"
+              ;;
+
+            modules)
+              echo "Module build requested."
+              ;;
+
+            *)
+              echo "::error::Unknown build target: $TARGET"
+              exit 1
+              ;;
+          esac
+
+      # ============================================================
+      # SAVE BUILD INFORMATION
+      # ============================================================
+      - name: Generate Build Information
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p release
+
+          {
+            echo "========================================="
+            echo " Xiaomi Camellian Kernel"
+            echo "========================================="
+            echo
+            echo "Repository : $GITHUB_REPOSITORY"
+            echo "Commit     : $GITHUB_SHA"
+            echo "Branch     : ${GITHUB_REF_NAME}"
+            echo "Target     : ${{ github.event.inputs.build_target }}"
+            echo "Architecture: arm64"
+            echo
+            echo "Compiler:"
+            aarch64-linux-android-gcc --version | head -n 1
+            echo
+            echo "Kernel:"
+            make O="$OUT_DIR" kernelversion
+          } > release/build-info.txt
+
+          cp "$OUT_DIR/.config" release/kernel.config
+
+      # ============================================================
+      # PREPARE ARTIFACT
+      # ============================================================
+      - name: Prepare Kernel Artifact
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p release
+
+          if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ]; then
+            cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" \
+              release/Image.gz-dtb
+          fi
+
+          if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
+            cp "$OUT_DIR/arch/arm64/boot/Image.gz" \
+              release/Image.gz
+          fi
+
+          if [ -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+            cp "$OUT_DIR/arch/arm64/boot/Image" \
+              release/Image
+          fi
+
+          find "$OUT_DIR/arch/arm64/boot/dts" \
+            -type f \
+            -name "*.dtb" \
+            -exec cp {} release/ \; 2>/dev/null || true
+
+          echo
+          echo "========================================="
+          echo " Final Release Files"
+          echo "========================================="
+
+          ls -lah release/
+
+      # ============================================================
+      # UPLOAD ARTIFACT
+      # ============================================================
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Camellian-Kernel-Output
-          path: |
-            out/arch/arm64/boot/Image.gz-dtb
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/dtb.img
+          name: Camellian-Kernel-${{ github.run_number }}
+          path: release/
+          if-no-files-found: error
+          compression-level: 9
