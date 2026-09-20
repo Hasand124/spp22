@@ -1,10 +1,10 @@
-name: Build Xiaomi Camellian T Kernel 333
+name: Build Xiaomi Camellian T Kernelw
 
 on:
   workflow_dispatch:
     inputs:
       build_target:
-        description: "Build Target"
+        description: "Kernel build target"
         required: true
         default: "Image.gz"
         type: choice
@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-kernel:
-    name: Build Camellian T Kernel
+    name: Build Camellian T OSS Kernel
     runs-on: ubuntu-22.04
 
     env:
@@ -26,26 +26,26 @@ jobs:
     steps:
 
       # ============================================================
-      # CHECKOUT
+      # CHECKOUT XIAOMI SOURCE
       # ============================================================
-      - name: Checkout Kernel Source
+      - name: Checkout Xiaomi Camellian T OSS
         uses: actions/checkout@v4
         with:
-          repository: Hasand124/spp22
+          repository: MiCode/Xiaomi_Kernel_OpenSource
           ref: camellian-t-oss
           fetch-depth: 1
           submodules: false
 
       # ============================================================
-      # VERIFY SOURCE
+      # SHOW SOURCE INFORMATION
       # ============================================================
-      - name: Verify Source
+      - name: Show Source Information
         shell: bash
         run: |
           set -euxo pipefail
 
           echo "=========================================="
-          echo "SOURCE"
+          echo "CAMELLIAN T OSS"
           echo "=========================================="
 
           echo "Repository:"
@@ -56,30 +56,15 @@ jobs:
           git rev-parse HEAD
 
           echo
-          echo "Branch:"
-          git branch -a
-
-          echo
           echo "Kernel version:"
           make kernelversion
 
-      # ============================================================
-      # SUBMODULES
-      # ============================================================
-      - name: Initialize Submodules
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          if [ -f .gitmodules ]; then
-            git submodule sync --recursive
-            git submodule update --init --recursive
-          else
-            echo "No .gitmodules found."
-          fi
+          echo
+          echo "Architecture:"
+          echo "$ARCH"
 
       # ============================================================
-      # DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ============================================================
       - name: Install Dependencies
         shell: bash
@@ -93,7 +78,6 @@ jobs:
             bison \
             build-essential \
             ccache \
-            clang \
             flex \
             git \
             libelf-dev \
@@ -101,7 +85,6 @@ jobs:
             libncurses-dev \
             libssl-dev \
             lz4 \
-            pahole \
             python3 \
             rsync \
             unzip \
@@ -110,20 +93,26 @@ jobs:
             zip
 
       # ============================================================
-      # GCC 4.9
+      # SETUP GCC 4.9
       # ============================================================
-      - name: Download Android GCC 4.9
+      - name: Setup Android GCC 4.9
         shell: bash
         run: |
           set -euxo pipefail
 
           mkdir -p "$GITHUB_WORKSPACE/toolchains"
 
-          git clone --depth=1 \
+          echo "Cloning AArch64 GCC 4.9..."
+
+          git clone \
+            --depth=1 \
             https://github.com/protocol-v/aarch64-linux-android-4.9.git \
             "$GITHUB_WORKSPACE/toolchains/gcc64"
 
-          git clone --depth=1 \
+          echo "Cloning ARM32 GCC 4.9..."
+
+          git clone \
+            --depth=1 \
             https://github.com/protocol-v/arm-linux-androideabi-4.9.git \
             "$GITHUB_WORKSPACE/toolchains/gcc32"
 
@@ -138,49 +127,58 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "AArch64:"
+          echo "=========================================="
+          echo "TOOLCHAIN"
+          echo "=========================================="
+
+          echo "AArch64 compiler:"
           command -v aarch64-linux-android-gcc
           aarch64-linux-android-gcc --version
 
           echo
-          echo "ARM32:"
+          echo "ARM32 compiler:"
           command -v arm-linux-androideabi-gcc
           arm-linux-androideabi-gcc --version
 
       # ============================================================
-      # FIND DEFCONFIG
+      # INSPECT CONFIGS
       # ============================================================
-      - name: Detect Defconfig
+      - name: Inspect Kernel Configurations
         shell: bash
         run: |
           set -euo pipefail
 
-          CONFIG_DIR="arch/arm64/configs"
-
           echo "=========================================="
-          echo "DEFCONFIG"
+          echo "AVAILABLE DEFCONFIGS"
           echo "=========================================="
 
-          if [ ! -d "$CONFIG_DIR" ]; then
-            echo "::error::$CONFIG_DIR does not exist."
+          if [ ! -d arch/arm64/configs ]; then
+            echo "::error::arch/arm64/configs does not exist."
             exit 1
           fi
 
-          echo "Camellian / MT6785 candidates:"
-
-          find "$CONFIG_DIR" \
-            -maxdepth 1 \
+          find arch/arm64/configs \
+            -maxdepth 2 \
             -type f \
-            \( \
-              -iname "*camellian*" \
-              -o \
-              -iname "*mt6785*" \
-            \) \
-            -printf "%f\n" \
-            | sort || true
+            -printf "%p\n" \
+            | sort \
+            | tee available-defconfigs.txt
+
+      # ============================================================
+      # DETECT CAMELLIAN DEFCONFIG
+      # ============================================================
+      - name: Detect Camellian Defconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "DETECTING DEFCONFIG"
+          echo "=========================================="
 
           DEFCONFIG=""
 
+          # First try known Camellian names.
           for cfg in \
             camellian_defconfig \
             camellian-t_defconfig \
@@ -188,38 +186,37 @@ jobs:
             camellian_userdebug_defconfig \
             mt6785_defconfig
           do
-            if [ -f "$CONFIG_DIR/$cfg" ]; then
+            if [ -f "arch/arm64/configs/$cfg" ]; then
               DEFCONFIG="$cfg"
               break
             fi
           done
 
+          # If not found, search automatically.
           if [ -z "$DEFCONFIG" ]; then
             DEFCONFIG="$(
-              find "$CONFIG_DIR" \
-                -maxdepth 1 \
+              find arch/arm64/configs \
                 -type f \
                 \( \
                   -iname "*camellian*" \
                   -o \
                   -iname "*mt6785*" \
+                  -o \
+                  -iname "*mtk*" \
                 \) \
                 -printf "%f\n" \
                 | sort \
-                | head -n 1
+                | head -n 1 \
+                || true
             )"
           fi
 
           if [ -z "$DEFCONFIG" ]; then
-            echo "::error::Camellian/MT6785 defconfig not found."
+            echo "::error::No Camellian/MT6785 defconfig found."
 
             echo
-            echo "Available configs:"
-            find "$CONFIG_DIR" \
-              -maxdepth 1 \
-              -type f \
-              -printf "%f\n" \
-              | sort
+            echo "Available configurations:"
+            cat available-defconfigs.txt
 
             exit 1
           fi
@@ -227,7 +224,7 @@ jobs:
           echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_ENV"
 
           echo
-          echo "Selected:"
+          echo "Selected defconfig:"
           echo "$DEFCONFIG"
 
       # ============================================================
@@ -241,20 +238,34 @@ jobs:
           rm -rf "$OUT_DIR"
           mkdir -p "$OUT_DIR"
 
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
           make \
             O="$OUT_DIR" \
             ARCH="$ARCH" \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             "$DEFCONFIG"
 
-          test -f "$OUT_DIR/.config"
+          if [ ! -f "$OUT_DIR/.config" ]; then
+            echo "::error::.config was not generated."
+            exit 1
+          fi
 
           echo
-          echo "Configuration successful."
+          echo "Kernel configuration generated successfully."
+
+          echo
+          echo "Important configuration:"
+          grep -E \
+            'CONFIG_(64BIT|ARM64|MODULES|LOCALVERSION)' \
+            "$OUT_DIR/.config" \
+            || true
 
       # ============================================================
-      # BUILD
+      # BUILD KERNEL
       # ============================================================
       - name: Build Kernel
         shell: bash
@@ -267,19 +278,23 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
           echo "=========================================="
-          echo "BUILDING KERNEL"
+          echo "BUILD KERNEL"
           echo "=========================================="
 
           echo
-          echo "Compiler:"
-          aarch64-linux-android-gcc --version | head -n 1
+          echo "Kernel:"
+          make O="$OUT_DIR" kernelversion
 
           echo
           echo "CPU:"
           nproc
 
           echo
-          echo "Starting make..."
+          echo "Compiler:"
+          aarch64-linux-android-gcc --version | head -n 1
+
+          echo
+          echo "Starting build..."
 
           make \
             -j"$(nproc)" \
@@ -289,16 +304,16 @@ jobs:
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             2>&1 | tee kernel-build.log
 
-          status=${PIPESTATUS[0]}
+          BUILD_STATUS=${PIPESTATUS[0]}
 
-          if [ "$status" -ne 0 ]; then
+          if [ "$BUILD_STATUS" -ne 0 ]; then
             echo
             echo "=========================================="
             echo "BUILD FAILED"
             echo "=========================================="
 
             echo
-            echo "Relevant errors:"
+            echo "Last relevant errors:"
 
             grep -iE \
               'error:|fatal error:|undefined reference|No such file|not found|failed' \
@@ -306,11 +321,14 @@ jobs:
               | tail -n 100 \
               || true
 
-            exit "$status"
+            exit "$BUILD_STATUS"
           fi
 
+          echo
+          echo "Kernel build completed."
+
       # ============================================================
-      # MODULES
+      # BUILD MODULES
       # ============================================================
       - name: Build Modules
         if: ${{ github.event.inputs.build_target == 'modules' }}
@@ -330,7 +348,7 @@ jobs:
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             modules
 
-          rm -rf modules
+          rm -rf "$GITHUB_WORKSPACE/modules"
 
           make \
             -j"$(nproc)" \
@@ -344,25 +362,38 @@ jobs:
       # ============================================================
       # INSPECT OUTPUT
       # ============================================================
-      - name: Inspect Output
+      - name: Inspect Build Output
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "OUTPUT"
+          echo "BOOT OUTPUT"
           echo "=========================================="
 
-          find "$OUT_DIR/arch/arm64/boot" \
-            -maxdepth 5 \
-            -type f \
-            -printf "%p\n" \
-            | sort
+          if [ -d "$OUT_DIR/arch/arm64/boot" ]; then
+            find "$OUT_DIR/arch/arm64/boot" \
+              -maxdepth 5 \
+              -type f \
+              -printf "%p\n" \
+              | sort
+          else
+            echo "::error::arch/arm64/boot does not exist."
+            exit 1
+          fi
+
+          echo
+          echo "Image files:"
+
+          ls -lh \
+            "$OUT_DIR/arch/arm64/boot/Image" \
+            "$OUT_DIR/arch/arm64/boot/Image.gz" \
+            2>/dev/null || true
 
       # ============================================================
-      # PREPARE RELEASE
+      # PREPARE ARTIFACT
       # ============================================================
-      - name: Prepare Release
+      - name: Prepare Artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -375,7 +406,10 @@ jobs:
           case "$TARGET" in
 
             Image.gz)
-              test -f "$OUT_DIR/arch/arm64/boot/Image.gz"
+              if [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
+                echo "::error::Image.gz was not generated."
+                exit 1
+              fi
 
               cp \
                 "$OUT_DIR/arch/arm64/boot/Image.gz" \
@@ -383,7 +417,10 @@ jobs:
               ;;
 
             Image)
-              test -f "$OUT_DIR/arch/arm64/boot/Image"
+              if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+                echo "::error::Image was not generated."
+                exit 1
+              fi
 
               cp \
                 "$OUT_DIR/arch/arm64/boot/Image" \
@@ -391,7 +428,10 @@ jobs:
               ;;
 
             modules)
-              test -d "$GITHUB_WORKSPACE/modules"
+              if [ ! -d "$GITHUB_WORKSPACE/modules" ]; then
+                echo "::error::Modules directory was not generated."
+                exit 1
+              fi
 
               cp -a \
                 "$GITHUB_WORKSPACE/modules" \
@@ -399,7 +439,7 @@ jobs:
               ;;
 
             *)
-              echo "::error::Unsupported target: $TARGET"
+              echo "::error::Unknown target: $TARGET"
               exit 1
               ;;
 
@@ -410,6 +450,8 @@ jobs:
             release/kernel.config
 
           {
+            echo "REPOSITORY=MiCode/Xiaomi_Kernel_OpenSource"
+            echo "BRANCH=camellian-t-oss"
             echo "DEFCONFIG=$DEFCONFIG"
             echo "TARGET=$TARGET"
             echo "KERNEL_VERSION=$(make O="$OUT_DIR" kernelversion)"
@@ -427,6 +469,9 @@ jobs:
             -printf "%p\n" \
             | sort
 
+          echo
+          du -ah release
+
       # ============================================================
       # UPLOAD BUILD LOG
       # ============================================================
@@ -437,6 +482,7 @@ jobs:
           name: Camellian-T-Build-Log-${{ github.run_number }}
           path: |
             kernel-build.log
+            available-defconfigs.txt
             out/.config
           if-no-files-found: ignore
           compression-level: 6
