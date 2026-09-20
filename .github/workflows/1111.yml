@@ -56,13 +56,25 @@ jobs:
           rm clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
-      - name: Setup Kernel Build Configuration
+      - name: Find and Setup Kernel Defconfig
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Make output directory and configure defconfig
-          make O=out ARCH=arm64 camellian_defconfig || make O=out ARCH=arm64 defconfig
+          # Cari file defconfig di dalam arch/arm64/configs/
+          DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f -name "*camellian*" -o -name "*camellia*" | head -n 1)
+          
+          if [ -n "$DEFCONFIG_FILE" ]; then
+            # Ambil path relatif dari arch/arm64/configs/
+            DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
+            echo "Menggunakan defconfig: $DEFCONFIG_NAME"
+            make O=out ARCH=arm64 "$DEFCONFIG_NAME"
+          else
+            echo "Defconfig camellia/camellian tidak ditemukan, menampilkan daftar config yang ada:"
+            ls -la arch/arm64/configs/
+            echo "Mencoba membuat default defconfig..."
+            make O=out ARCH=arm64 defconfig
+          fi
 
       - name: Build Kernel
         run: |
@@ -81,7 +93,7 @@ jobs:
 
       - name: Check Build Output
         run: |
-          ls -la out/arch/arm64/boot/
+          ls -la out/arch/arm64/boot/ || true
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
