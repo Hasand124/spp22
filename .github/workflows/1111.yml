@@ -3,6 +3,14 @@ name: Build Xiaomi Camellian Kernelf
 on:
   workflow_dispatch:
     inputs:
+      kernel_repo:
+        description: 'URL Repository Kernel'
+        required: true
+        default: 'https://github.com/MiCode/Xiaomi_Kernel_OpenSource' # Ganti jika Anda punya repo kernel spesifik
+      kernel_branch:
+        description: 'Branch Repository Kernel'
+        required: true
+        default: 'camellia-r-oss' # Ganti dengan nama branch kernel Anda
       build_target:
         description: 'Build Target (default: Image.gz-dtb)'
         required: true
@@ -13,7 +21,7 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-      - name: Checkout Repository
+      - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
       - name: Set up Environment & Dependencies
@@ -42,20 +50,11 @@ jobs:
             llvm \
             lld
 
-      - name: Locate Kernel Source Directory
+      - name: Clone Kernel Source
         run: |
-          echo "Current directory contents:"
-          ls -la
-          
-          # Cari lokasi Makefile utama kernel jika source disimpan di subfolder
-          MAKEFILE_PATH=$(find . -maxdepth 3 -name "Makefile" -exec grep -q "VERSION =" {} \; -print | head -n 1)
-          if [ -n "$MAKEFILE_PATH" ]; then
-            KERNEL_DIR=$(dirname "$MAKEFILE_PATH")
-            echo "Kernel source ditemukan di: $KERNEL_DIR"
-            echo "KERNEL_DIR=$KERNEL_DIR" >> $GITHUB_ENV
-          else
-            echo "KERNEL_DIR=." >> $GITHUB_ENV
-          fi
+          echo "Cloning source code kernel..."
+          git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} ${{ github.event.inputs.kernel_repo }} kernel-source
+          echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel-source" >> $GITHUB_ENV
 
       - name: Download and Setup Clang Toolchain
         run: |
@@ -77,19 +76,17 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Cari file defconfig secara fleksibel di seluruh repository
-          DEFCONFIG_FILE=$(find . -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) | grep "configs" | head -n 1)
+          # Cari file defconfig camellian / camellia / vendor
+          DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) 2>/dev/null | head -n 1)
           
           if [ -n "$DEFCONFIG_FILE" ]; then
-            # Ambil nama config saja dari path
-            DEFCONFIG_NAME=$(basename "$DEFCONFIG_FILE")
-            echo "Ditemukan file defconfig: $DEFCONFIG_FILE"
-            echo "Menggunakan target make: $DEFCONFIG_NAME"
+            # Ambil path relatif dari arch/arm64/configs/
+            DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
+            echo "Menggunakan defconfig: $DEFCONFIG_NAME"
             make O=out ARCH=arm64 "$DEFCONFIG_NAME"
           else
-            echo "ERROR: Tidak dapat menemukan file defconfig di direktori configs!"
-            echo "Daftar direktori saat ini:"
-            find . -maxdepth 3 -type d
+            echo "ERROR: File defconfig tidak ditemukan di arch/arm64/configs/!"
+            ls -la arch/arm64/configs/
             exit 1
           fi
 
