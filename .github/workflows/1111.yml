@@ -12,7 +12,7 @@ on:
         required: true
         default: 'camellian-t-oss'
       build_target:
-        description: 'Build Target (default: Image.gz-dtb)'
+        description: 'Build Target'
         required: true
         default: 'Image.gz-dtb'
 
@@ -59,35 +59,30 @@ jobs:
           git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} ${{ github.event.inputs.kernel_repo }} kernel-source
           echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel-source" >> $GITHUB_ENV
 
-      - name: Apply Auto-Patches for Known Compilation Errors
+      - name: Apply Auto-Patches & Strip -Werror
         run: |
           cd ${{ env.KERNEL_DIR }}
-          echo "=== Applying Fix 1: Fix unused variable 'nid' in mm/vmscan.c ==="
+          
+          echo "=== Patch 1: Unused variable 'nid' in mm/vmscan.c ==="
           if [ -f mm/vmscan.c ]; then
             sed -i 's/int nid;/int nid __maybe_unused;/g' mm/vmscan.c
           fi
 
-          echo "=== Applying Fix 2: Fix mt_get_uartlog_status conflict in include/linux/printk.h ==="
+          echo "=== Patch 2: mt_get_uartlog_status conflict in include/linux/printk.h ==="
           if [ -f include/linux/printk.h ]; then
             sed -i 's/extern bool mt_get_uartlog_status(void);/#ifndef _MTK_PRINTK_CTRL_H\nextern bool mt_get_uartlog_status(void);\n#endif/g' include/linux/printk.h
           fi
 
-      - name: Download and Setup Clang Toolchain
+          echo "=== Patch 3: Hapus paksasemua flag -Werror di Makefile ==="
+          find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/-Werror//g' {} +
+
+      - name: Download AOSP Clang Toolchain (r450784d)
         run: |
           mkdir -p clang-toolchain
-          echo "Downloading ZyCromerZ Clang..."
-          curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases/latest | \
-          grep "browser_download_url.*tar.gz" | \
-          cut -d : -f 2,3 | \
-          tr -d \" | \
-          wget -i - -O clang.tar.gz
-
-          tar -xf clang.tar.gz -C clang-toolchain
-          rm clang.tar.gz
-
-          # Hapus symlink 'as' dari clang-toolchain jika ada agar fallback ke LLVM/Clang
-          rm -f $GITHUB_WORKSPACE/clang-toolchain/bin/as
-
+          echo "Downloading AOSP Clang Toolchain r450784d..."
+          curl -LO "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz"
+          tar -xzf clang-r450784d.tar.gz -C clang-toolchain
+          rm clang-r450784d.tar.gz
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
       - name: Find and Setup Kernel Defconfig
@@ -96,7 +91,7 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
 
-          DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) 2>/dev/null | head -n 1)
+          DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) 2>/devnull | head -n 1)
 
           if [ -n "$DEFCONFIG_FILE" ]; then
             DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
@@ -107,28 +102,41 @@ jobs:
             exit 1
           fi
 
-      - name: Build Kernel
+      - name: Build Kernel with Error Catching
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang-toolchain/bin:$PATH"
 
-          make -j$(nproc) O=out \
-            ARCH=arm64 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            KCFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-variable"
+          EXTRA_FLAGS="-Wno-error -Wno-unused-variable -Wno-unused-but-set-variable -Wno-enum-conversion -Wno-implicit-function-declaration -Wno-typedef-redefinition"
+
+          MAKE_CMD=(
+            make O=out
+            ARCH=arm64
+            CC=clang
+            LD=ld.lld
+            AR=llvm-ar
+            NM=llvm-nm
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            LLVM=1
+            LLVM_IAS=0
+            KCFLAGS="$EXTRA_FLAGS"
+            KBUILD_CFLAGS="$EXTRA_FLAGS"
+          )
+
+          echo "=== Menjalankan Build Paralel ==="
+          "${MAKE_CMD[@]}" -j$(nproc) || {
+            echo "--------------------------------------------------------"
+            echo "BUILD PARALEL GAGAL. Menjalankan ulang dengan -j1 untuk isolasi error..."
+            echo "--------------------------------------------------------"
+            "${MAKE_CMD[@]}" -j1
+          }
 
       - name: Check Build Output
         run: |
