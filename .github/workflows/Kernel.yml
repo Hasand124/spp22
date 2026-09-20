@@ -411,6 +411,10 @@ jobs:
           export SUBARCH=arm64
           export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
 
+          # GCC 4.9 ignores no_sanitize attributes on this kernel tree.
+          # Keep the warning visible, but do not promote it to a fatal error.
+          export KCFLAGS="-Wno-error=attributes"
+
           echo "=========================================="
           echo " Building kernel"
           echo "=========================================="
@@ -455,6 +459,7 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
+          export KCFLAGS="-Wno-error=attributes"
 
           if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
 
@@ -485,6 +490,7 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
+          export KCFLAGS="-Wno-error=attributes"
 
           make \
             -j"$(nproc)" \
