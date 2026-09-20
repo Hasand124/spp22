@@ -19,9 +19,9 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # CHECKOUT KERNEL
-      # ============================================================
+      # ==========================================================
+      # CHECKOUT
+      # ==========================================================
 
       - name: Checkout Xiaomi kernel
         uses: actions/checkout@v4
@@ -29,10 +29,43 @@ jobs:
           repository: MiCode/Xiaomi_Kernel_OpenSource
           ref: camellian-t-oss
           fetch-depth: 1
+          submodules: recursive
 
-      # ============================================================
+      # ==========================================================
+      # SYSTEM INFORMATION
+      # ==========================================================
+
+      - name: System information
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " System"
+          echo "=========================================="
+
+          uname -a
+          lsb_release -a || true
+
+          echo
+          echo "CPU:"
+          nproc
+
+          echo
+          echo "Memory:"
+          free -h
+
+          echo
+          echo "Disk:"
+          df -h .
+
+          echo
+          echo "Git:"
+          git --version
+
+      # ==========================================================
       # DEPENDENCIES
-      # ============================================================
+      # ==========================================================
 
       - name: Install dependencies
         shell: bash
@@ -64,26 +97,54 @@ jobs:
             zip \
             zstd
 
-      # ============================================================
-      # DOWNLOAD AARCH64 GCC 4.9
-      #
-      # IMPORTANT:
-      # Do NOT download a .tar.xz.
-      #
-      # The AOSP repository still contains the actual GCC 4.9
-      # binaries on ndk-release-r18.
-      # ============================================================
+      # ==========================================================
+      # SOURCE INFORMATION
+      # ==========================================================
 
-      - name: Download AArch64 GCC 4.9
+      - name: Inspect kernel source
         shell: bash
         run: |
           set -eux
 
           echo "=========================================="
-          echo " Downloading AArch64 GCC 4.9"
+          echo " Kernel source"
           echo "=========================================="
 
+          echo "Repository:"
+          git remote get-url origin
+
+          echo
+          echo "Branch:"
+          git branch --show-current || true
+
+          echo
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo
+          echo "Kernel version:"
+          grep -E \
+            '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' \
+            Makefile || true
+
+          echo
+          echo "Submodules:"
+          git submodule status || true
+
+      # ==========================================================
+      # GCC 4.9
+      # ==========================================================
+
+      - name: Download Android GCC 4.9
+        shell: bash
+        run: |
+          set -eux
+
           TOOLCHAIN="$GITHUB_WORKSPACE/$TOOLCHAIN_DIR"
+
+          echo "=========================================="
+          echo " Android GCC 4.9"
+          echo "=========================================="
 
           rm -rf "$TOOLCHAIN"
 
@@ -95,177 +156,174 @@ jobs:
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             "$TOOLCHAIN"
 
-          echo
-          echo "Checking GCC binaries..."
+          GCC="$TOOLCHAIN/bin/aarch64-linux-android-gcc"
 
-          if [ ! -f "$TOOLCHAIN/bin/aarch64-linux-android-gcc" ]; then
-            echo "::error::aarch64-linux-android-gcc not found"
+          if [ ! -x "$GCC" ]; then
+            chmod +x "$TOOLCHAIN/bin/"* || true
+          fi
+
+          test -f "$GCC"
+
+          echo
+          echo "Compiler:"
+          "$GCC" --version
+
+          echo
+          echo "Toolchain:"
+          echo "$TOOLCHAIN"
+
+          echo "ANDROID_GCC=$TOOLCHAIN" >> "$GITHUB_ENV"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+
+      # ==========================================================
+      # VERIFY TOOLCHAIN
+      # ==========================================================
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -eux
+
+          GCC="$ANDROID_GCC/bin/aarch64-linux-android-gcc"
+          LD="$ANDROID_GCC/bin/aarch64-linux-android-ld"
+          AS="$ANDROID_GCC/bin/aarch64-linux-android-as"
+
+          echo "=========================================="
+          echo " Verifying toolchain"
+          echo "=========================================="
+
+          test -f "$GCC"
+          test -f "$LD"
+          test -f "$AS"
+
+          chmod +x "$GCC" "$LD" "$AS" || true
+
+          "$GCC" --version
+          "$LD" --version | head -1
+          "$AS" --version | head -1
+
+      # ==========================================================
+      # FIND MIHW DEPENDENCY
+      # ==========================================================
+
+      - name: Check Xiaomi MIHW dependency
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " Checking MIHW dependency"
+          echo "=========================================="
+
+          TARGET="vendor/xiaomi/kernel_modules/mihw/millet/Makefile"
+
+          echo "Expected:"
+          echo "$TARGET"
+
+          echo
+          echo "Checking file..."
+
+          if [ -f "$TARGET" ]; then
+            echo "MIHW Makefile found."
+          else
+            echo "::warning::MIHW Makefile is missing."
 
             echo
-            echo "Available GCC files:"
-            find "$TOOLCHAIN" \
+            echo "Searching Xiaomi vendor tree:"
+            find vendor \
+              -maxdepth 8 \
               -type f \
-              \( -name '*gcc*' -o -name '*cc1*' \) \
-              | sort
+              2>/dev/null \
+              | grep -Ei \
+                'mihw|millet|kernel_modules|xiaomi' \
+              | sort \
+              | head -500 \
+              || true
+
+            echo
+            echo "Searching all MIHW references:"
+            grep -RIn \
+              --exclude-dir=.git \
+              -E \
+              'mihw|millet|kernel_modules' \
+              . \
+              2>/dev/null \
+              | head -500 \
+              || true
+
+            echo
+            echo "Git submodules:"
+            git submodule status || true
+
+            echo
+            echo "::error::Required Xiaomi MIHW source is missing."
+            echo "::error::Expected: $TARGET"
 
             exit 1
           fi
 
-          chmod +x "$TOOLCHAIN/bin/"* || true
-
-          echo
-          echo "GCC:"
-          "$TOOLCHAIN/bin/aarch64-linux-android-gcc" --version
-
-          echo
-          echo "Toolchain:"
-          find "$TOOLCHAIN/bin" \
-            -maxdepth 1 \
-            -type f \
-            -name 'aarch64-linux-android-*' \
-            | sort
-
-          echo
-          echo "ANDROID_GCC=$TOOLCHAIN" >> "$GITHUB_ENV"
-
-      # ============================================================
-      # VERIFY TOOLCHAIN
-      # ============================================================
-
-      - name: Verify GCC
-        shell: bash
-        run: |
-          set -eux
-
-          echo "ANDROID_GCC=$ANDROID_GCC"
-
-          test -f \
-            "$ANDROID_GCC/bin/aarch64-linux-android-gcc"
-
-          test -f \
-            "$ANDROID_GCC/bin/aarch64-linux-android-ld"
-
-          test -f \
-            "$ANDROID_GCC/bin/aarch64-linux-android-as"
-
-          echo "$ANDROID_GCC/bin" >> "$GITHUB_PATH"
-
-          command -v aarch64-linux-android-gcc
-
-          aarch64-linux-android-gcc --version
-
-          echo
-          echo "Testing compiler..."
-
-          cat > /tmp/test.c <<'EOF'
-          int main(void)
-          {
-              return 0;
-          }
-          EOF
-
-          aarch64-linux-android-gcc \
-            -c \
-            /tmp/test.c \
-            -o /tmp/test.o
-
-          file /tmp/test.o
-
-          echo
-          echo "GCC compiler test: OK"
-
-      # ============================================================
-      # SHOW SOURCE INFORMATION
-      # ============================================================
-
-      - name: Show kernel source information
-        shell: bash
-        run: |
-          set -eux
-
-          echo "=========================================="
-          echo " Kernel source information"
-          echo "=========================================="
-
-          echo "Repository:"
-          git remote -v
-
-          echo
-          echo "Branch:"
-          git branch --show-current
-
-          echo
-          echo "Commit:"
-          git rev-parse HEAD
-
-          echo
-          echo "Kernel Makefile:"
-          grep -E \
-            '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' \
-            Makefile || true
-
-      # ============================================================
+      # ==========================================================
       # FIND DEFCONFIG
-      # ============================================================
+      # ==========================================================
 
       - name: Find Camellian defconfig
-        id: defconfig
+        id: config
         shell: bash
         run: |
           set -eux
 
+          CONFIG_DIR="arch/arm64/configs"
+
           echo "=========================================="
-          echo " Searching for Camellian defconfig"
+          echo " Searching defconfig"
           echo "=========================================="
 
+          test -d "$CONFIG_DIR"
+
           echo
-          echo "Available arm64 configs:"
-          find arch/arm64/configs \
+          echo "Available defconfigs:"
+          find "$CONFIG_DIR" \
             -type f \
             -name '*defconfig' \
             | sort
 
           echo
-          echo "Searching for camellian..."
+          echo "Camellian candidates:"
+
+          find "$CONFIG_DIR" \
+            -type f \
+            \( \
+              -iname '*camellian*defconfig' \
+              -o -iname '*camellia*defconfig' \
+              -o -iname '*mt6785*defconfig' \
+              -o -iname '*mt6768*defconfig' \
+            \) \
+            | sort \
+            | tee /tmp/camellian-defconfigs.txt
 
           DEFCONFIG_FILE="$(
-            find arch/arm64/configs \
-              -type f \
-              -iname '*camellian*defconfig' \
-              | sort \
-              | head -n 1
+            head -n 1 /tmp/camellian-defconfigs.txt
           )"
 
           if [ -z "$DEFCONFIG_FILE" ]; then
-            echo "::error::Camellian defconfig was not found."
-
             echo
-            echo "Searching possible MediaTek configs:"
-            find arch/arm64/configs \
-              -type f \
-              -iname '*mt6785*defconfig' \
-              | sort || true
-
+            echo "::error::No Camellian/MT6785 defconfig found."
             exit 1
           fi
 
-          echo
-          echo "Found:"
-          echo "$DEFCONFIG_FILE"
-
-          DEFCONFIG="$(basename "$DEFCONFIG_FILE")"
+          DEFCONFIG="${DEFCONFIG_FILE#arch/arm64/configs/}"
 
           echo
-          echo "Using defconfig:"
+          echo "Selected defconfig:"
           echo "$DEFCONFIG"
 
           echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_OUTPUT"
 
-      # ============================================================
+      # ==========================================================
       # PREPARE OUTPUT
-      # ============================================================
+      # ==========================================================
 
-      - name: Prepare output directory
+      - name: Prepare output
         shell: bash
         run: |
           set -eux
@@ -274,68 +332,27 @@ jobs:
 
           mkdir -p "$OUT_DIR"
 
-      # ============================================================
-      # SET BUILD ENVIRONMENT
-      # ============================================================
-
-      - name: Configure build environment
-        shell: bash
-        run: |
-          set -eux
-
-          echo "ARCH=$ARCH" >> "$GITHUB_ENV"
-          echo "SUBARCH=$SUBARCH" >> "$GITHUB_ENV"
-
-          echo \
-            "CROSS_COMPILE=$ANDROID_GCC/bin/aarch64-linux-android-" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "CC=$ANDROID_GCC/bin/aarch64-linux-android-gcc" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "AR=$ANDROID_GCC/bin/aarch64-linux-android-ar" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "AS=$ANDROID_GCC/bin/aarch64-linux-android-as" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "LD=$ANDROID_GCC/bin/aarch64-linux-android-ld" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "NM=$ANDROID_GCC/bin/aarch64-linux-android-nm" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "OBJCOPY=$ANDROID_GCC/bin/aarch64-linux-android-objcopy" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "OBJDUMP=$ANDROID_GCC/bin/aarch64-linux-android-objdump" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "STRIP=$ANDROID_GCC/bin/aarch64-linux-android-strip" \
-            >> "$GITHUB_ENV"
-
-      # ============================================================
+      # ==========================================================
       # GENERATE DEFCONFIG
-      # ============================================================
+      # ==========================================================
 
       - name: Generate defconfig
         env:
-          DEFCONFIG: ${{ steps.defconfig.outputs.DEFCONFIG }}
+          DEFCONFIG: ${{ steps.config.outputs.DEFCONFIG }}
         shell: bash
         run: |
           set -eux
 
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
+
           echo "=========================================="
-          echo " Generating kernel configuration"
+          echo " Generating defconfig"
           echo "=========================================="
+
+          echo "DEFCONFIG=$DEFCONFIG"
+          echo "CROSS_COMPILE=$CROSS_COMPILE"
 
           make \
             O="$OUT_DIR" \
@@ -344,52 +361,59 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             "$DEFCONFIG"
 
-      # ============================================================
-      # VERIFY CONFIG
-      # ============================================================
+      # ==========================================================
+      # CHECK CONFIG
+      # ==========================================================
 
-      - name: Verify kernel configuration
+      - name: Verify configuration
         shell: bash
         run: |
           set -eux
 
-          test -f "$OUT_DIR/.config"
+          CONFIG="$OUT_DIR/.config"
 
           echo "=========================================="
           echo " Kernel configuration"
           echo "=========================================="
 
-          grep -E \
-            '^CONFIG_ARM64=' \
-            "$OUT_DIR/.config" || true
-
-          grep -E \
-            '^CONFIG_MODULES=' \
-            "$OUT_DIR/.config" || true
-
-          grep -E \
-            '^CONFIG_MODVERSIONS=' \
-            "$OUT_DIR/.config" || true
-
-          grep -E \
-            '^CONFIG_CC_STACKPROTECTOR' \
-            "$OUT_DIR/.config" || true
+          test -f "$CONFIG"
 
           echo
-          echo "Config generated successfully."
+          echo "ARM64:"
+          grep '^CONFIG_ARM64=' "$CONFIG" || true
 
-      # ============================================================
-      # COMPILER FEATURE TEST
-      # ============================================================
+          echo
+          echo "Modules:"
+          grep '^CONFIG_MODULES=' "$CONFIG" || true
 
-      - name: Test compiler features
+          echo
+          echo "MODVERSIONS:"
+          grep '^CONFIG_MODVERSIONS=' "$CONFIG" || true
+
+          echo
+          echo "Stack protector:"
+          grep '^CONFIG_CC_STACKPROTECTOR' "$CONFIG" || true
+
+          echo
+          echo "Clang:"
+          grep '^CONFIG_CC_IS_CLANG=' "$CONFIG" || true
+
+      # ==========================================================
+      # COMPILER TEST
+      # ==========================================================
+
+      - name: Test compiler
         shell: bash
         run: |
           set -eux
 
-          echo "Testing -fstack-protector-strong..."
+          echo "=========================================="
+          echo " Compiler test"
+          echo "=========================================="
 
-          cat > /tmp/stack_test.c <<'EOF'
+          GCC="$ANDROID_GCC/bin/aarch64-linux-android-gcc"
+
+          cat > /tmp/test.c <<'EOF'
           int test_function(const char *input)
           {
               char buffer[128];
@@ -401,26 +425,37 @@ jobs:
           }
           EOF
 
-          "$ANDROID_GCC/bin/aarch64-linux-android-gcc" \
+          "$GCC" \
             -fstack-protector-strong \
             -c \
-            /tmp/stack_test.c \
-            -o /tmp/stack_test.o
+            /tmp/test.c \
+            -o /tmp/test.o
 
-          echo "Compiler supports -fstack-protector-strong"
+          file /tmp/test.o
 
-      # ============================================================
+      # ==========================================================
       # BUILD KERNEL
-      # ============================================================
+      # ==========================================================
 
       - name: Build kernel
         shell: bash
         run: |
-          set -eux
+          set -o pipefail
+
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
 
           echo "=========================================="
           echo " Building kernel"
           echo "=========================================="
+
+          echo "GCC:"
+          "$ANDROID_GCC/bin/aarch64-linux-android-gcc" --version
+
+          echo
+          echo "CROSS_COMPILE:"
+          echo "$CROSS_COMPILE"
 
           make \
             -j"$(nproc)" \
@@ -430,18 +465,22 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             2>&1 | tee kernel-build.log
 
-      # ============================================================
+      # ==========================================================
       # BUILD MODULES
-      # ============================================================
+      # ==========================================================
 
-      - name: Build kernel modules
+      - name: Build modules
         shell: bash
         run: |
           set -eux
 
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
+
           if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
 
-            echo "CONFIG_MODULES=y"
+            echo "Building modules..."
 
             make \
               -j"$(nproc)" \
@@ -452,19 +491,21 @@ jobs:
               modules
 
           else
-
             echo "CONFIG_MODULES is disabled."
-
           fi
 
-      # ============================================================
+      # ==========================================================
       # BUILD DTBS
-      # ============================================================
+      # ==========================================================
 
       - name: Build DTBs
         shell: bash
         run: |
           set -eux
+
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
 
           make \
             -j"$(nproc)" \
@@ -474,49 +515,24 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             dtbs
 
-      # ============================================================
-      # BUILD DTBO
-      # ============================================================
-
-      - name: Build DTBO
-        shell: bash
-        run: |
-          set -eux
-
-          if grep -q \
-            '^CONFIG_BUILD_ARM64_DT_OVERLAY=y' \
-            "$OUT_DIR/.config"; then
-
-            echo "CONFIG_BUILD_ARM64_DT_OVERLAY=y"
-
-            make \
-              -j"$(nproc)" \
-              O="$OUT_DIR" \
-              ARCH="$ARCH" \
-              SUBARCH="$SUBARCH" \
-              CROSS_COMPILE="$CROSS_COMPILE" \
-              dtbs
-
-          else
-
-            echo "DT overlay support is not enabled."
-
-          fi
-
-      # ============================================================
+      # ==========================================================
       # INSTALL MODULES
-      # ============================================================
+      # ==========================================================
 
-      - name: Install kernel modules
+      - name: Install modules
         shell: bash
         run: |
           set -eux
 
-          rm -rf "$OUT_DIR/modules"
-
-          mkdir -p "$OUT_DIR/modules"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="$ANDROID_GCC/bin/aarch64-linux-android-"
 
           if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
+
+            rm -rf "$OUT_DIR/modules"
+
+            mkdir -p "$OUT_DIR/modules"
 
             make \
               O="$OUT_DIR" \
@@ -527,16 +543,14 @@ jobs:
               INSTALL_MOD_PATH="$GITHUB_WORKSPACE/$OUT_DIR/modules"
 
           else
-
             echo "CONFIG_MODULES is disabled."
-
           fi
 
-      # ============================================================
-      # COLLECT BUILD OUTPUT
-      # ============================================================
+      # ==========================================================
+      # COLLECT OUTPUT
+      # ==========================================================
 
-      - name: Collect kernel output
+      - name: Collect output
         shell: bash
         run: |
           set -eux
@@ -552,7 +566,7 @@ jobs:
           BOOT="$OUT_DIR/arch/arm64/boot"
 
           echo "=========================================="
-          echo " Kernel images"
+          echo " Collecting kernel"
           echo "=========================================="
 
           for IMAGE in \
@@ -562,73 +576,93 @@ jobs:
             Image.gz-dtb \
             Image-dtb
           do
-
             if [ -f "$BOOT/$IMAGE" ]; then
-
               echo "Found: $IMAGE"
-
-              cp \
-                "$BOOT/$IMAGE" \
-                "release/$IMAGE"
-
+              cp "$BOOT/$IMAGE" "release/$IMAGE"
             fi
-
           done
 
           echo
-          echo "=========================================="
-          echo " DTBs"
-          echo "=========================================="
+          echo "DTBs:"
 
           find "$BOOT" \
             -type f \
             -name '*.dtb' \
-            -print \
             -exec cp {} release/dtb/ \; \
             || true
 
           echo
-          echo "=========================================="
-          echo " DTBO"
-          echo "=========================================="
+          echo "DTBOs:"
 
           find "$BOOT" \
             -type f \
             -name '*.dtbo' \
-            -print \
             -exec cp {} release/dtbo/ \; \
             || true
 
           echo
-          echo "=========================================="
-          echo " Kernel modules"
-          echo "=========================================="
+          echo "Modules:"
 
           find "$OUT_DIR" \
             -type f \
             -name '*.ko' \
-            -print \
             -exec cp {} release/modules/ \; \
             || true
 
           echo
-          echo "Collected files:"
+          echo "Release:"
           find release \
             -type f \
             | sort
 
-      # ============================================================
-      # GENERATE MODULES.LOAD
-      # ============================================================
+      # ==========================================================
+      # VALIDATE KERNEL
+      # ==========================================================
 
-      - name: Generate modules.load
+      - name: Validate kernel output
         shell: bash
         run: |
           set -eux
 
           echo "=========================================="
-          echo " Generating modules.load"
+          echo " Validating output"
           echo "=========================================="
+
+          KERNEL_FOUND=0
+
+          for IMAGE in \
+            release/Image \
+            release/Image.gz \
+            release/Image.lz4 \
+            release/Image.gz-dtb \
+            release/Image-dtb
+          do
+            if [ -f "$IMAGE" ]; then
+              echo "Kernel found: $IMAGE"
+              KERNEL_FOUND=1
+            fi
+          done
+
+          if [ "$KERNEL_FOUND" -eq 0 ]; then
+            echo "::error::No kernel Image was produced."
+
+            find "$OUT_DIR/arch/arm64/boot" \
+              -maxdepth 2 \
+              -type f \
+              | sort \
+              || true
+
+            exit 1
+          fi
+
+      # ==========================================================
+      # MODULES.LOAD
+      # ==========================================================
+
+      - name: Generate modules.load
+        shell: bash
+        run: |
+          set -eux
 
           : > release/modules.load
 
@@ -640,58 +674,16 @@ jobs:
             | sort \
             > release/modules.load
 
-          echo
           echo "modules.load:"
           cat release/modules.load
 
-      # ============================================================
-      # VERIFY MODULE VERMAGIC
-      # ============================================================
-
-      - name: Verify kernel modules
-        shell: bash
-        run: |
-          set -eux
-
-          if [ -d release/modules ] && \
-             find release/modules \
-               -maxdepth 1 \
-               -name '*.ko' \
-               | grep -q .; then
-
-            echo "=========================================="
-            echo " Module information"
-            echo "=========================================="
-
-            for MODULE in release/modules/*.ko
-            do
-
-              echo
-              echo "------------------------------------------"
-              echo "$MODULE"
-              echo "------------------------------------------"
-
-              "$ANDROID_GCC/bin/aarch64-linux-android-readelf" \
-                -S "$MODULE" \
-                | grep -E \
-                  'gnu.linkonce.this_module|__versions' \
-                || true
-
-            done
-
-          else
-
-            echo "No kernel modules were generated."
-
-          fi
-
-      # ============================================================
-      # BUILD INFO
-      # ============================================================
+      # ==========================================================
+      # BUILD INFORMATION
+      # ==========================================================
 
       - name: Generate build information
         env:
-          DEFCONFIG: ${{ steps.defconfig.outputs.DEFCONFIG }}
+          DEFCONFIG: ${{ steps.config.outputs.DEFCONFIG }}
         shell: bash
         run: |
           set -eux
@@ -699,7 +691,7 @@ jobs:
           KERNEL_VERSION="$(
             make \
               O="$OUT_DIR" \
-              ARCH="$ARCH" \
+              ARCH=arm64 \
               kernelversion \
               2>/dev/null \
               || echo unknown
@@ -753,9 +745,9 @@ jobs:
 
           cat release/build-info.txt
 
-      # ============================================================
-      # CREATE ZIP
-      # ============================================================
+      # ==========================================================
+      # PACKAGE
+      # ==========================================================
 
       - name: Package kernel
         shell: bash
@@ -774,16 +766,23 @@ jobs:
 
           cd ..
 
-          echo
           echo "=========================================="
-          echo " Kernel package"
+          echo " Package"
           echo "=========================================="
 
           ls -lh "$ZIP_NAME"
 
-      # ============================================================
+      # ==========================================================
       # UPLOAD ARTIFACT
-      # ============================================================
+      # ==========================================================
 
       - name: Upload kernel artifact
         uses: actions/upload-artifact@v4
+        with:
+          name: camellian-kernel
+          path: |
+            camellian-kernel-*.zip
+            release/
+            kernel-build.log
+          if-no-files-found: error
+          compression-level: 6
