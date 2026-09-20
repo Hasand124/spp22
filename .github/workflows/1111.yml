@@ -6,11 +6,11 @@ on:
       kernel_repo:
         description: 'URL Repository Kernel'
         required: true
-        default: 'https://github.com/MiCode/Xiaomi_Kernel_OpenSource' # Ganti jika Anda punya repo kernel spesifik
+        default: 'https://github.com/MiCode/Xiaomi_Kernel_OpenSource'
       kernel_branch:
         description: 'Branch Repository Kernel'
         required: true
-        default: 'camellia-r-oss' # Ganti dengan nama branch kernel Anda
+        default: 'camellia-r-oss'
       build_target:
         description: 'Build Target (default: Image.gz-dtb)'
         required: true
@@ -48,7 +48,10 @@ jobs:
             libmpc-dev \
             libmpfr-dev \
             llvm \
-            lld
+            lld \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi
 
       - name: Clone Kernel Source
         run: |
@@ -68,6 +71,10 @@ jobs:
           
           tar -xf clang.tar.gz -C clang-toolchain
           rm clang.tar.gz
+          
+          # Hapus symlink 'as' dari clang-toolchain jika ada agar fallback ke LLVM/Clang
+          rm -f $GITHUB_WORKSPACE/clang-toolchain/bin/as
+          
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
       - name: Find and Setup Kernel Defconfig
@@ -76,17 +83,14 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Cari file defconfig camellian / camellia / vendor
           DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) 2>/dev/null | head -n 1)
           
           if [ -n "$DEFCONFIG_FILE" ]; then
-            # Ambil path relatif dari arch/arm64/configs/
             DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
             echo "Menggunakan defconfig: $DEFCONFIG_NAME"
             make O=out ARCH=arm64 "$DEFCONFIG_NAME"
           else
-            echo "ERROR: File defconfig tidak ditemukan di arch/arm64/configs/!"
-            ls -la arch/arm64/configs/
+            echo "ERROR: File defconfig tidak ditemukan!"
             exit 1
           fi
 
@@ -100,6 +104,12 @@ jobs:
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
