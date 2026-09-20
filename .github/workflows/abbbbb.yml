@@ -1,0 +1,86 @@
+name: Build Xiaomi Camellian Kernelee
+
+on:
+  workflow_dispatch:
+    inputs:
+        build_target:
+          description: 'Build Target (default: Image.gz-dtb)'
+          required: true
+          default: 'Image.gz-dtb'
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Environment & Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-data-libc \
+            build-essential \
+            bc \
+            binutils \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            git \
+            wget \
+            rsync \
+            unzip \
+            zip \
+            libncurses5-dev \
+            python3
+
+      - name: Setup Toolchain (GCC 64-bit & 32-bit)
+        run: |
+          echo "Setting up Linaro / AArch64 Toolchain..."
+          git clone --depth=1 https://github.com/protocol-v/aarch64-linux-android-4.9.git -b master gcc64
+          git clone --depth=1 https://github.com/protocol-v/arm-linux-androideabi-4.9.git -b master gcc32
+          
+          # Tambahkan ke path sementara
+          echo "$GITHUB_WORKSPACE/gcc64/bin" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/gcc32/bin" >> $GITHUB_PATH
+
+      - name: Setup Kernel Build Configuration
+        run: |
+          # Periksa ketersediaan defconfig untuk camellian/camellia
+          # Umumnya menggunakan arsitektur arm64
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          # Cari file defconfig yang sesuai diarch/arm64/configs/
+          # Contoh target defconfig untuk device MTK biasanya ada di dalam tree
+          make O=out camellian_defconfig || make O=out defconfig
+
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          
+          # Optimasi kompilasi berdasarkan core CPU runner GitHub (2 cores)
+          nproc
+          make -j$(nproc) O=out \
+            ARCH=arm64 \
+            CC=gcc \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
+      - name: Check Build Output
+        run: |
+          ls -l out/arch/arm64/boot/
+
+      - name: Upload Kernel Artifact (Image.gz-dtb / AnyKernel3 ready)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Camellian-Kernel-Output
+          path: |
+            out/arch/arm64/boot/Image.gz-dtb
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/dtb.img
