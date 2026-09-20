@@ -73,16 +73,20 @@ jobs:
             sed -i 's/extern bool mt_get_uartlog_status(void);/#ifndef _MTK_PRINTK_CTRL_H\nextern bool mt_get_uartlog_status(void);\n#endif/g' include/linux/printk.h
           fi
 
-          echo "=== Patch 3: Hapus paksasemua flag -Werror di Makefile ==="
+          echo "=== Patch 3: Hapus paksa semua flag -Werror di Makefile ==="
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/-Werror//g' {} +
 
       - name: Download AOSP Clang Toolchain (r450784d)
         run: |
           mkdir -p clang-toolchain
           echo "Downloading AOSP Clang Toolchain r450784d..."
-          curl -LO "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz"
-          tar -xzf clang-r450784d.tar.gz -C clang-toolchain
-          rm clang-r450784d.tar.gz
+          
+          # Mengunduh langsung archive tar.xz Clang r450784d yang valid
+          wget -q https://raw.githubusercontent.com/ZyCromerZ/Clang/main/Clang-14.0.7-r450784d.tar.gz -O clang.tar.gz || \
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r450784d.tar.gz -O clang.tar.gz
+
+          tar -xzf clang.tar.gz -C clang-toolchain
+          rm -f clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
       - name: Find and Setup Kernel Defconfig
