@@ -10,7 +10,7 @@ on:
       kernel_branch:
         description: 'Branch Repository Kernel'
         required: true
-        default: 'camellia-r-oss'
+        default: 'camellian-t-oss'
       build_target:
         description: 'Build Target (default: Image.gz-dtb)'
         required: true
@@ -19,7 +19,7 @@ on:
 jobs:
   build-kernel:
     runs-on: ubuntu-22.04
-    
+
     steps:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
@@ -59,6 +59,19 @@ jobs:
           git clone --depth=1 -b ${{ github.event.inputs.kernel_branch }} ${{ github.event.inputs.kernel_repo }} kernel-source
           echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel-source" >> $GITHUB_ENV
 
+      - name: Apply Auto-Patches for Known Compilation Errors
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          echo "=== Applying Fix 1: Fix unused variable 'nid' in mm/vmscan.c ==="
+          if [ -f mm/vmscan.c ]; then
+            sed -i 's/int nid;/int nid __maybe_unused;/g' mm/vmscan.c
+          fi
+
+          echo "=== Applying Fix 2: Fix mt_get_uartlog_status conflict in include/linux/printk.h ==="
+          if [ -f include/linux/printk.h ]; then
+            sed -i 's/extern bool mt_get_uartlog_status(void);/#ifndef _MTK_PRINTK_CTRL_H\nextern bool mt_get_uartlog_status(void);\n#endif/g' include/linux/printk.h
+          fi
+
       - name: Download and Setup Clang Toolchain
         run: |
           mkdir -p clang-toolchain
@@ -68,13 +81,13 @@ jobs:
           cut -d : -f 2,3 | \
           tr -d \" | \
           wget -i - -O clang.tar.gz
-          
+
           tar -xf clang.tar.gz -C clang-toolchain
           rm clang.tar.gz
-          
+
           # Hapus symlink 'as' dari clang-toolchain jika ada agar fallback ke LLVM/Clang
           rm -f $GITHUB_WORKSPACE/clang-toolchain/bin/as
-          
+
           echo "$GITHUB_WORKSPACE/clang-toolchain/bin" >> $GITHUB_PATH
 
       - name: Find and Setup Kernel Defconfig
@@ -82,9 +95,9 @@ jobs:
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
-          
+
           DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) 2>/dev/null | head -n 1)
-          
+
           if [ -n "$DEFCONFIG_FILE" ]; then
             DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
             echo "Menggunakan defconfig: $DEFCONFIG_NAME"
@@ -100,7 +113,7 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang-toolchain/bin:$PATH"
-          
+
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -114,7 +127,8 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 \
-            LLVM_IAS=1
+            LLVM_IAS=1 \
+            KCFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-variable"
 
       - name: Check Build Output
         run: |
@@ -127,5 +141,8 @@ jobs:
           path: |
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz-dtb
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb.img
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtbo.img
+          if-no-files-found: warn
