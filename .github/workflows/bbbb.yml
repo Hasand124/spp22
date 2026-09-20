@@ -1,0 +1,89 @@
+name: Build Xiaomi Camellian Kernels
+
+on:
+  push:
+    branches: [ "camellian-t-oss", "main", "master" ]
+  pull_request:
+    branches: [ "camellian-t-oss" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libncurses-dev \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            git \
+            curl \
+            zip \
+            unzip \
+            cpio \
+            lld
+
+      - name: Set Up Clang Toolchain
+        run: |
+          echo "=== Downloading Android Clang Toolchain ==="
+          mkdir -p $GITHUB_WORKSPACE/clang
+          cd $GITHUB_WORKSPACE/clang
+          # Mengunduh Android Clang r450784d (Clang 14.0.7) yang stabil untuk Android T MediaTek Kernel
+          curl -LO "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz"
+          tar -xzf clang-r450784d.tar.gz
+          rm clang-r450784d.tar.gz
+
+      - name: Apply Fixes for Compilation Errors
+        run: |
+          echo "=== Applying Fix 1: Fix unused variable 'nid' in mm/vmscan.c ==="
+          if [ -f mm/vmscan.c ]; then
+            sed -i 's/int nid;/int nid __maybe_unused;/g' mm/vmscan.c
+          fi
+
+          echo "=== Applying Fix 2: Fix mt_get_uartlog_status conflict in include/linux/printk.h ==="
+          if [ -f include/linux/printk.h ]; then
+            sed -i 's/extern bool mt_get_uartlog_status(void);/#ifndef _MTK_PRINTK_CTRL_H\nextern bool mt_get_uartlog_status(void);\n#endif/g' include/linux/printk.h
+          fi
+
+      - name: Build Kernel Image
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
+
+          # Variabel kompilasi Clang + Cross GCC
+          MAKE_ARGS=(
+            ARCH=arm64
+            CC=clang
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-android-
+            CROSS_COMPILE_COMPAT=arm-linux-androideabi-
+            KCFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-variable"
+          )
+
+          echo "=== Generating Config (camellian_defconfig) ==="
+          make "${MAKE_ARGS[@]}" camellian_defconfig
+
+          echo "=== Starting Kernel Compilation ==="
+          make -j$(nproc --all) "${MAKE_ARGS[@]}"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: camellian-kernel-build
+          path: |
+            arch/arm64/boot/Image
+            arch/arm64/boot/Image.gz
+            arch/arm64/boot/dtbo.img
+          if-no-files-found: error
