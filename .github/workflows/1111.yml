@@ -1,4 +1,4 @@
-name: Build Xiaomi Camellian Kernelf
+name: Build Xiaomi Camellian Kernel
 
 on:
   workflow_dispatch:
@@ -42,6 +42,21 @@ jobs:
             llvm \
             lld
 
+      - name: Locate Kernel Source Directory
+        run: |
+          echo "Current directory contents:"
+          ls -la
+          
+          # Cari lokasi Makefile utama kernel jika source disimpan di subfolder
+          MAKEFILE_PATH=$(find . -maxdepth 3 -name "Makefile" -exec grep -q "VERSION =" {} \; -print | head -n 1)
+          if [ -n "$MAKEFILE_PATH" ]; then
+            KERNEL_DIR=$(dirname "$MAKEFILE_PATH")
+            echo "Kernel source ditemukan di: $KERNEL_DIR"
+            echo "KERNEL_DIR=$KERNEL_DIR" >> $GITHUB_ENV
+          else
+            echo "KERNEL_DIR=." >> $GITHUB_ENV
+          fi
+
       - name: Download and Setup Clang Toolchain
         run: |
           mkdir -p clang-toolchain
@@ -58,26 +73,29 @@ jobs:
 
       - name: Find and Setup Kernel Defconfig
         run: |
+          cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Cari file defconfig di dalam arch/arm64/configs/
-          DEFCONFIG_FILE=$(find arch/arm64/configs/ -type f -name "*camellian*" -o -name "*camellia*" | head -n 1)
+          # Cari file defconfig secara fleksibel di seluruh repository
+          DEFCONFIG_FILE=$(find . -type f \( -name "*camellian*" -o -name "*camellia*" -o -name "*defconfig*" \) | grep "configs" | head -n 1)
           
           if [ -n "$DEFCONFIG_FILE" ]; then
-            # Ambil path relatif dari arch/arm64/configs/
-            DEFCONFIG_NAME=$(echo "$DEFCONFIG_FILE" | sed 's|arch/arm64/configs/||')
-            echo "Menggunakan defconfig: $DEFCONFIG_NAME"
+            # Ambil nama config saja dari path
+            DEFCONFIG_NAME=$(basename "$DEFCONFIG_FILE")
+            echo "Ditemukan file defconfig: $DEFCONFIG_FILE"
+            echo "Menggunakan target make: $DEFCONFIG_NAME"
             make O=out ARCH=arm64 "$DEFCONFIG_NAME"
           else
-            echo "Defconfig camellia/camellian tidak ditemukan, menampilkan daftar config yang ada:"
-            ls -la arch/arm64/configs/
-            echo "Mencoba membuat default defconfig..."
-            make O=out ARCH=arm64 defconfig
+            echo "ERROR: Tidak dapat menemukan file defconfig di direktori configs!"
+            echo "Daftar direktori saat ini:"
+            find . -maxdepth 3 -type d
+            exit 1
           fi
 
       - name: Build Kernel
         run: |
+          cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
           export PATH="$GITHUB_WORKSPACE/clang-toolchain/bin:$PATH"
@@ -93,14 +111,14 @@ jobs:
 
       - name: Check Build Output
         run: |
-          ls -la out/arch/arm64/boot/ || true
+          ls -la ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/ || true
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Camellian-Kernel-Output
           path: |
-            out/arch/arm64/boot/Image.gz-dtb
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/dtb
-            out/arch/arm64/boot/dtb.img
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz-dtb
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/dtb.img
