@@ -12,15 +12,21 @@ env:
   OUT_DIR: out
   TOOLCHAIN_DIR: toolchain/aarch64-linux-android-4.9
 
+  KERNEL_REPO: MiCode/Xiaomi_Kernel_OpenSource
+  KERNEL_BRANCH: camellian-t-oss
+
+  MODULE_REPO: MiCode/MTK_kernel_modules
+  MODULE_BRANCH: camellian-t-oss
+
 jobs:
   build:
-    name: Build camellian-t-oss
+    name: Build Camellian T Kernel
     runs-on: ubuntu-22.04
 
     steps:
 
       # ==========================================================
-      # CHECKOUT
+      # CHECKOUT MAIN KERNEL
       # ==========================================================
 
       - name: Checkout Xiaomi kernel
@@ -29,42 +35,9 @@ jobs:
           repository: MiCode/Xiaomi_Kernel_OpenSource
           ref: camellian-t-oss
           fetch-depth: 1
-          submodules: recursive
 
       # ==========================================================
-      # SYSTEM INFORMATION
-      # ==========================================================
-
-      - name: System information
-        shell: bash
-        run: |
-          set -eux
-
-          echo "=========================================="
-          echo " System"
-          echo "=========================================="
-
-          uname -a
-          lsb_release -a || true
-
-          echo
-          echo "CPU:"
-          nproc
-
-          echo
-          echo "Memory:"
-          free -h
-
-          echo
-          echo "Disk:"
-          df -h .
-
-          echo
-          echo "Git:"
-          git --version
-
-      # ==========================================================
-      # DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ==========================================================
 
       - name: Install dependencies
@@ -98,10 +71,106 @@ jobs:
             zstd
 
       # ==========================================================
+      # CHECKOUT MTK KERNEL MODULES
+      # ==========================================================
+
+      - name: Checkout Xiaomi MTK kernel modules
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " Xiaomi MTK kernel modules"
+          echo "=========================================="
+
+          MODULE_ROOT="$GITHUB_WORKSPACE/vendor/xiaomi/kernel_modules"
+
+          rm -rf "$MODULE_ROOT"
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/vendor/xiaomi"
+
+          git clone \
+            --depth=1 \
+            --branch camellian-t-oss \
+            https://github.com/MiCode/MTK_kernel_modules.git \
+            "$MODULE_ROOT"
+
+          echo
+          echo "Module repository:"
+          git -C "$MODULE_ROOT" remote get-url origin
+
+          echo
+          echo "Module commit:"
+          git -C "$MODULE_ROOT" rev-parse HEAD
+
+          echo
+          echo "Module branch:"
+          git -C "$MODULE_ROOT" branch --show-current
+
+      # ==========================================================
+      # VERIFY MIHW / MILLET
+      # ==========================================================
+
+      - name: Verify Xiaomi MIHW modules
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " Verifying Xiaomi MIHW"
+          echo "=========================================="
+
+          MODULE_ROOT="$GITHUB_WORKSPACE/vendor/xiaomi/kernel_modules"
+
+          MILLET_DIR="$MODULE_ROOT/mihw/millet"
+          MILLET_MAKEFILE="$MILLET_DIR/Makefile"
+
+          echo "MODULE_ROOT:"
+          echo "$MODULE_ROOT"
+
+          echo
+          echo "MILLET:"
+          echo "$MILLET_DIR"
+
+          echo
+          echo "Checking Makefile..."
+
+          if [ ! -f "$MILLET_MAKEFILE" ]; then
+
+            echo "::error::Millet Makefile is missing."
+
+            echo
+            echo "Available MIHW files:"
+
+            find "$MODULE_ROOT" \
+              -type f \
+              | grep -Ei \
+                'mihw|millet' \
+              | sort \
+              | head -500 \
+              || true
+
+            exit 1
+          fi
+
+          echo
+          echo "Millet Makefile found:"
+          ls -lh "$MILLET_MAKEFILE"
+
+          echo
+          echo "MIHW directory:"
+          find "$MODULE_ROOT/mihw" \
+            -maxdepth 3 \
+            -type f \
+            | sort \
+            | head -500
+
+      # ==========================================================
       # SOURCE INFORMATION
       # ==========================================================
 
-      - name: Inspect kernel source
+      - name: Show source information
         shell: bash
         run: |
           set -eux
@@ -110,16 +179,16 @@ jobs:
           echo " Kernel source"
           echo "=========================================="
 
-          echo "Repository:"
+          echo "Kernel repository:"
           git remote get-url origin
 
           echo
-          echo "Branch:"
-          git branch --show-current || true
+          echo "Kernel commit:"
+          git rev-parse HEAD
 
           echo
-          echo "Commit:"
-          git rev-parse HEAD
+          echo "Kernel branch:"
+          git branch --show-current || true
 
           echo
           echo "Kernel version:"
@@ -128,11 +197,20 @@ jobs:
             Makefile || true
 
           echo
-          echo "Submodules:"
-          git submodule status || true
+          echo "=========================================="
+          echo " Module source"
+          echo "=========================================="
+
+          git -C vendor/xiaomi/kernel_modules \
+            remote get-url origin
+
+          echo
+          echo "Module commit:"
+          git -C vendor/xiaomi/kernel_modules \
+            rev-parse HEAD
 
       # ==========================================================
-      # GCC 4.9
+      # DOWNLOAD GCC 4.9
       # ==========================================================
 
       - name: Download Android GCC 4.9
@@ -140,11 +218,11 @@ jobs:
         run: |
           set -eux
 
-          TOOLCHAIN="$GITHUB_WORKSPACE/$TOOLCHAIN_DIR"
-
           echo "=========================================="
           echo " Android GCC 4.9"
           echo "=========================================="
+
+          TOOLCHAIN="$GITHUB_WORKSPACE/$TOOLCHAIN_DIR"
 
           rm -rf "$TOOLCHAIN"
 
@@ -158,11 +236,12 @@ jobs:
 
           GCC="$TOOLCHAIN/bin/aarch64-linux-android-gcc"
 
-          if [ ! -x "$GCC" ]; then
-            chmod +x "$TOOLCHAIN/bin/"* || true
+          if [ ! -f "$GCC" ]; then
+            echo "::error::GCC 4.9 was not found."
+            exit 1
           fi
 
-          test -f "$GCC"
+          chmod +x "$TOOLCHAIN/bin/"* || true
 
           echo
           echo "Compiler:"
@@ -176,21 +255,21 @@ jobs:
           echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
 
       # ==========================================================
-      # VERIFY TOOLCHAIN
+      # VERIFY GCC
       # ==========================================================
 
-      - name: Verify toolchain
+      - name: Verify GCC
         shell: bash
         run: |
           set -eux
 
+          echo "=========================================="
+          echo " Verifying GCC"
+          echo "=========================================="
+
           GCC="$ANDROID_GCC/bin/aarch64-linux-android-gcc"
           LD="$ANDROID_GCC/bin/aarch64-linux-android-ld"
           AS="$ANDROID_GCC/bin/aarch64-linux-android-as"
-
-          echo "=========================================="
-          echo " Verifying toolchain"
-          echo "=========================================="
 
           test -f "$GCC"
           test -f "$LD"
@@ -198,69 +277,14 @@ jobs:
 
           chmod +x "$GCC" "$LD" "$AS" || true
 
+          echo
           "$GCC" --version
-          "$LD" --version | head -1
-          "$AS" --version | head -1
-
-      # ==========================================================
-      # FIND MIHW DEPENDENCY
-      # ==========================================================
-
-      - name: Check Xiaomi MIHW dependency
-        shell: bash
-        run: |
-          set -eux
-
-          echo "=========================================="
-          echo " Checking MIHW dependency"
-          echo "=========================================="
-
-          TARGET="vendor/xiaomi/kernel_modules/mihw/millet/Makefile"
-
-          echo "Expected:"
-          echo "$TARGET"
 
           echo
-          echo "Checking file..."
+          "$LD" --version | head -1
 
-          if [ -f "$TARGET" ]; then
-            echo "MIHW Makefile found."
-          else
-            echo "::warning::MIHW Makefile is missing."
-
-            echo
-            echo "Searching Xiaomi vendor tree:"
-            find vendor \
-              -maxdepth 8 \
-              -type f \
-              2>/dev/null \
-              | grep -Ei \
-                'mihw|millet|kernel_modules|xiaomi' \
-              | sort \
-              | head -500 \
-              || true
-
-            echo
-            echo "Searching all MIHW references:"
-            grep -RIn \
-              --exclude-dir=.git \
-              -E \
-              'mihw|millet|kernel_modules' \
-              . \
-              2>/dev/null \
-              | head -500 \
-              || true
-
-            echo
-            echo "Git submodules:"
-            git submodule status || true
-
-            echo
-            echo "::error::Required Xiaomi MIHW source is missing."
-            echo "::error::Expected: $TARGET"
-
-            exit 1
-          fi
+          echo
+          "$AS" --version | head -1
 
       # ==========================================================
       # FIND DEFCONFIG
@@ -272,49 +296,64 @@ jobs:
         run: |
           set -eux
 
+          echo "=========================================="
+          echo " Searching Camellian defconfig"
+          echo "=========================================="
+
           CONFIG_DIR="arch/arm64/configs"
 
-          echo "=========================================="
-          echo " Searching defconfig"
-          echo "=========================================="
-
-          test -d "$CONFIG_DIR"
+          if [ ! -d "$CONFIG_DIR" ]; then
+            echo "::error::$CONFIG_DIR does not exist."
+            exit 1
+          fi
 
           echo
           echo "Available defconfigs:"
+
           find "$CONFIG_DIR" \
             -type f \
             -name '*defconfig' \
             | sort
 
           echo
-          echo "Camellian candidates:"
-
-          find "$CONFIG_DIR" \
-            -type f \
-            \( \
-              -iname '*camellian*defconfig' \
-              -o -iname '*camellia*defconfig' \
-              -o -iname '*mt6785*defconfig' \
-              -o -iname '*mt6768*defconfig' \
-            \) \
-            | sort \
-            | tee /tmp/camellian-defconfigs.txt
+          echo "Searching Camellian..."
 
           DEFCONFIG_FILE="$(
-            head -n 1 /tmp/camellian-defconfigs.txt
+            find "$CONFIG_DIR" \
+              -type f \
+              \( \
+                -iname '*camellian*defconfig' \
+                -o \
+                -iname '*camellia*defconfig' \
+                -o \
+                -iname '*mt6785*defconfig' \
+              \) \
+              | sort \
+              | head -n 1
           )"
 
           if [ -z "$DEFCONFIG_FILE" ]; then
+
             echo
             echo "::error::No Camellian/MT6785 defconfig found."
+
+            echo
+            echo "Possible configs:"
+
+            find "$CONFIG_DIR" \
+              -type f \
+              | grep -Ei \
+                'vendor|mtk|mt6785|camellia|camellian' \
+              | sort \
+              || true
+
             exit 1
           fi
 
           DEFCONFIG="${DEFCONFIG_FILE#arch/arm64/configs/}"
 
           echo
-          echo "Selected defconfig:"
+          echo "Selected:"
           echo "$DEFCONFIG"
 
           echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_OUTPUT"
@@ -362,10 +401,10 @@ jobs:
             "$DEFCONFIG"
 
       # ==========================================================
-      # CHECK CONFIG
+      # CONFIG CHECK
       # ==========================================================
 
-      - name: Verify configuration
+      - name: Verify kernel config
         shell: bash
         run: |
           set -eux
@@ -383,20 +422,20 @@ jobs:
           grep '^CONFIG_ARM64=' "$CONFIG" || true
 
           echo
+          echo "MIHW:"
+          grep '^CONFIG_MIHW=' "$CONFIG" || true
+
+          echo
+          echo "MILLET:"
+          grep '^CONFIG_MILLET=' "$CONFIG" || true
+
+          echo
           echo "Modules:"
           grep '^CONFIG_MODULES=' "$CONFIG" || true
 
           echo
           echo "MODVERSIONS:"
           grep '^CONFIG_MODVERSIONS=' "$CONFIG" || true
-
-          echo
-          echo "Stack protector:"
-          grep '^CONFIG_CC_STACKPROTECTOR' "$CONFIG" || true
-
-          echo
-          echo "Clang:"
-          grep '^CONFIG_CC_IS_CLANG=' "$CONFIG" || true
 
       # ==========================================================
       # COMPILER TEST
@@ -406,10 +445,6 @@ jobs:
         shell: bash
         run: |
           set -eux
-
-          echo "=========================================="
-          echo " Compiler test"
-          echo "=========================================="
 
           GCC="$ANDROID_GCC/bin/aarch64-linux-android-gcc"
 
@@ -450,7 +485,7 @@ jobs:
           echo " Building kernel"
           echo "=========================================="
 
-          echo "GCC:"
+          echo "Compiler:"
           "$ANDROID_GCC/bin/aarch64-linux-android-gcc" --version
 
           echo
@@ -491,7 +526,9 @@ jobs:
               modules
 
           else
+
             echo "CONFIG_MODULES is disabled."
+
           fi
 
       # ==========================================================
@@ -543,14 +580,16 @@ jobs:
               INSTALL_MOD_PATH="$GITHUB_WORKSPACE/$OUT_DIR/modules"
 
           else
+
             echo "CONFIG_MODULES is disabled."
+
           fi
 
       # ==========================================================
       # COLLECT OUTPUT
       # ==========================================================
 
-      - name: Collect output
+      - name: Collect kernel files
         shell: bash
         run: |
           set -eux
@@ -566,7 +605,7 @@ jobs:
           BOOT="$OUT_DIR/arch/arm64/boot"
 
           echo "=========================================="
-          echo " Collecting kernel"
+          echo " Kernel images"
           echo "=========================================="
 
           for IMAGE in \
@@ -610,25 +649,22 @@ jobs:
             || true
 
           echo
-          echo "Release:"
+          echo "Release files:"
+
           find release \
             -type f \
             | sort
 
       # ==========================================================
-      # VALIDATE KERNEL
+      # VALIDATE OUTPUT
       # ==========================================================
 
-      - name: Validate kernel output
+      - name: Validate kernel
         shell: bash
         run: |
           set -eux
 
-          echo "=========================================="
-          echo " Validating output"
-          echo "=========================================="
-
-          KERNEL_FOUND=0
+          FOUND=0
 
           for IMAGE in \
             release/Image \
@@ -639,12 +675,12 @@ jobs:
           do
             if [ -f "$IMAGE" ]; then
               echo "Kernel found: $IMAGE"
-              KERNEL_FOUND=1
+              FOUND=1
             fi
           done
 
-          if [ "$KERNEL_FOUND" -eq 0 ]; then
-            echo "::error::No kernel Image was produced."
+          if [ "$FOUND" -eq 0 ]; then
+            echo "::error::No kernel image was produced."
 
             find "$OUT_DIR/arch/arm64/boot" \
               -maxdepth 2 \
@@ -674,11 +710,11 @@ jobs:
             | sort \
             > release/modules.load
 
-          echo "modules.load:"
+          echo
           cat release/modules.load
 
       # ==========================================================
-      # BUILD INFORMATION
+      # BUILD INFO
       # ==========================================================
 
       - name: Generate build information
@@ -702,7 +738,7 @@ jobs:
           Xiaomi Camellian Kernel
           ==========================================
 
-          Device:
+          Devices:
           POCO M3 Pro 5G
           Redmi Note 10 5G
           Redmi Note 10T
@@ -710,22 +746,31 @@ jobs:
           Codename:
           camellian
 
-          Platform:
+          SoC:
           MediaTek MT6785
 
           Android:
           Android T
 
-          Repository:
+          Kernel repository:
           MiCode/Xiaomi_Kernel_OpenSource
 
-          Branch:
+          Kernel branch:
           camellian-t-oss
 
-          Commit:
+          Kernel commit:
           $(git rev-parse HEAD)
 
-          Kernel:
+          Module repository:
+          MiCode/MTK_kernel_modules
+
+          Module branch:
+          camellian-t-oss
+
+          Module commit:
+          $(git -C vendor/xiaomi/kernel_modules rev-parse HEAD)
+
+          Kernel version:
           $KERNEL_VERSION
 
           Architecture:
@@ -766,17 +811,13 @@ jobs:
 
           cd ..
 
-          echo "=========================================="
-          echo " Package"
-          echo "=========================================="
-
           ls -lh "$ZIP_NAME"
 
       # ==========================================================
-      # UPLOAD ARTIFACT
+      # UPLOAD
       # ==========================================================
 
-      - name: Upload kernel artifact
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
           name: camellian-kernel
