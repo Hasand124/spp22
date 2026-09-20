@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          REPOSITORY="https://github.com/Hasand124/spp22.git"
+          REPOSITORY="https://github.com/MiCode/Xiaomi_Kernel_OpenSource/tree/camellian-t-oss"
           BRANCH="camellian-t-oss"
 
           echo "Checking repository: $REPOSITORY"
