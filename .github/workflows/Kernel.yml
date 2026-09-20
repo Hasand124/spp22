@@ -401,4 +401,3 @@ jobs:
             out/arch/arm64/boot/dts/**/*.dtb
             out/arch/arm64/boot/dts/**/*.dtbo
           if-no-files-found: warn
-```
