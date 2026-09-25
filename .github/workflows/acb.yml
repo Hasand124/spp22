@@ -12,6 +12,7 @@ on:
         - https://gitlab.com/OrangeFox/sync.git
         - https://github.com/linastorvaldz/fox-sync.git
         - https://github.com/ashahir05/orangefox-sync.git
+        - https://github.com/JoysKo/OrangeFox_sync.git
       MANIFEST_BRANCH:
         description: 'OrangeFox Branch'
         required: true
@@ -21,6 +22,8 @@ on:
         - 14.1
         - 12.1
         - 11.0
+        - 10.0
+        - 9.0
       DEVICE_TREE:
         description: 'Custom Recovery Tree'
         required: true
